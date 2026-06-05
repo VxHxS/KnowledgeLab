@@ -35,6 +35,10 @@ function Write-KnowledgeWarning {
     }
 }
 
+function Test-GuiOutput {
+    return ($env:LMSTUDIO_GUI_OUTPUT -match "^(1|true|yes|on)$")
+}
+
 function Test-AutoIndexRunning {
     param([string] $PidPath)
     if (-not (Test-Path -LiteralPath $PidPath)) {
@@ -114,9 +118,18 @@ if ($UseLightRag -and -not (Test-Path -LiteralPath (Join-Path $StoragePath "vdb_
     $UseLightRag = $false
 }
 
-& (Join-Path $PSScriptRoot "start-knowledge-lab.ps1")
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+$StartScript = Join-Path $PSScriptRoot "start-knowledge-lab.ps1"
+if (Test-GuiOutput) {
+    $startupOutput = @(& $StartScript 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        Write-KnowledgeWarning "Не удалось подготовить LM Studio. Проверь, что LM Studio запущен и доступен на http://127.0.0.1:1234."
+        exit $LASTEXITCODE
+    }
+} else {
+    & $StartScript
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
 }
 & $Python (Join-Path $PSScriptRoot "query-vault-lmstudio.py") $Question
 exit $LASTEXITCODE

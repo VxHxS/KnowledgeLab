@@ -394,6 +394,10 @@ def readable_text_color(background: str) -> str:
     return "#1f2933" if luminance > 150 else "#ffffff"
 
 
+def compact_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value.strip().lower())
+
+
 def capture_destination(scope: str, topic: str, kind: str) -> Path:
     if scope == "web":
         base = VAULT_DIR / "20 Projects" / "Web Development"
@@ -501,6 +505,7 @@ class KnowledgeChatApp:
         self.game_guard_var = tk.BooleanVar(value=bool(self.settings["game_guard_enabled"]))
         self.button_color_var = tk.StringVar(value=str(self.settings["button_color"]))
         self.tooltips: list[ToolTip] = []
+        self.chat_widgets: list[tk.Widget] = []
         self.intro_visible = False
         self.input_history: list[str] = []
         self.input_history_index = 0
@@ -643,11 +648,10 @@ class KnowledgeChatApp:
         scroll = ttk.Scrollbar(chat_inner, orient="vertical", command=self.chat.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         self.chat.configure(yscrollcommand=scroll.set)
-        self.chat.tag_configure("user", foreground="#174ea6")
-        self.chat.tag_configure("assistant", foreground="#202124")
-        self.chat.tag_configure("system", foreground="#5f6368")
+        self.chat.tag_configure("assistant", foreground="#202124", spacing1=8, spacing3=12, lmargin1=2, lmargin2=2, rmargin=110)
+        self.chat.tag_configure("system", foreground="#5f6368", spacing1=4, spacing3=8)
         self.chat.tag_configure("warning", foreground="#7a838c", font=("Segoe UI", 9))
-        self.chat.tag_configure("error", foreground="#b3261e")
+        self.chat.tag_configure("error", foreground="#b3261e", spacing1=8, spacing3=12)
 
         input_frame = ttk.Frame(main, style="Composer.TFrame")
         input_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -983,6 +987,7 @@ class KnowledgeChatApp:
     def set_chat_text(self, text: str, tag: str = "system") -> None:
         self.chat.configure(state="normal")
         self.chat.delete("1.0", "end")
+        self.chat_widgets.clear()
         self.chat.insert("end", text, tag)
         self.chat.configure(state="disabled")
         self.chat.see("end")
@@ -990,10 +995,8 @@ class KnowledgeChatApp:
     def show_intro(self) -> None:
         self.intro_visible = True
         intro = (
-            "System: Здесь можно задавать вопросы по базе знаний и добавлять новые заметки/ссылки.\n"
-            "Контекст выбирается автоматически. Enter отправляет сообщение, Shift+Enter добавляет новую строку; это можно изменить в настройках.\n"
-            "LightRAG включен по умолчанию; если индекс еще не готов, он соберется в фоне, а ответ все равно появится.\n"
-            "Obsidian открывает папку заметок для ручного просмотра и правки.\n"
+            "Задайте вопрос по базе знаний или добавьте заметку/ссылку.\n"
+            "Enter отправляет, Shift+Enter добавляет новую строку. Остальное можно изменить в настройках.\n"
         )
         self.set_chat_text(intro, "system")
 
@@ -1002,6 +1005,7 @@ class KnowledgeChatApp:
             return
         self.chat.configure(state="normal")
         self.chat.delete("1.0", "end")
+        self.chat_widgets.clear()
         self.chat.configure(state="disabled")
         self.intro_visible = False
 
@@ -1014,7 +1018,118 @@ class KnowledgeChatApp:
         self.chat.see("end")
 
     def append_system(self, text: str) -> None:
-        self.append(f"System: {text}\n", "system")
+        self.append(f"{text}\n", "system")
+
+    def rounded_canvas_rect(
+        self,
+        canvas: tk.Canvas,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        radius: int,
+        *,
+        fill: str,
+    ) -> int:
+        points = [
+            x1 + radius, y1,
+            x2 - radius, y1,
+            x2, y1,
+            x2, y1 + radius,
+            x2, y2 - radius,
+            x2, y2,
+            x2 - radius, y2,
+            x1 + radius, y2,
+            x1, y2,
+            x1, y2 - radius,
+            x1, y1 + radius,
+            x1, y1,
+        ]
+        return int(canvas.create_polygon(points, smooth=True, fill=fill, outline=""))
+
+    def append_user_message(self, text: str) -> None:
+        self.remove_intro()
+        clean_text = text.strip()
+        if not clean_text:
+            return
+
+        self.chat.configure(state="normal")
+        self.chat.insert("end", "\n")
+        canvas_width = max(420, self.chat.winfo_width() - 28)
+        bubble_width = min(560, max(260, canvas_width - 170))
+        canvas = tk.Canvas(
+            self.chat,
+            width=canvas_width,
+            height=60,
+            highlightthickness=0,
+            bd=0,
+            background="#ffffff",
+        )
+        text_id = canvas.create_text(
+            canvas_width - 22,
+            14,
+            text=clean_text,
+            anchor="ne",
+            width=bubble_width - 28,
+            justify="left",
+            fill="#202124",
+            font=("Segoe UI", 10),
+        )
+        bbox = canvas.bbox(text_id) or (canvas_width - bubble_width, 8, canvas_width - 18, 44)
+        rect = self.rounded_canvas_rect(
+            canvas,
+            max(12, bbox[0] - 13),
+            max(6, bbox[1] - 10),
+            min(canvas_width - 10, bbox[2] + 13),
+            bbox[3] + 10,
+            14,
+            fill="#f0f1f3",
+        )
+        canvas.tag_lower(rect, text_id)
+        canvas.configure(height=max(46, bbox[3] + 18))
+        self.chat.window_create("end", window=canvas)
+        self.chat.insert("end", "\n")
+        self.chat_widgets.append(canvas)
+        self.chat.configure(state="disabled")
+        self.chat.see("end")
+
+    def append_assistant_message(self, text: str, tag: str = "assistant") -> None:
+        clean_text = text.strip()
+        if not clean_text:
+            return
+        self.append(f"{clean_text}\n", tag)
+
+    def append_warning_message(self, text: str) -> None:
+        clean_text = text.strip()
+        if clean_text:
+            self.append(f"{clean_text}\n", "warning")
+
+    def is_service_output_line(self, line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        prefixes = (
+            "Game Guard:",
+            "Starting LM Studio server",
+            "Waking up LM Studio service",
+            "Embedding model already loaded:",
+            "LLM already loaded:",
+            "Knowledge Lab is ready.",
+            "API:",
+            "LLM identifier:",
+            "Embedding identifier:",
+            "Idle unload:",
+            "Success! Server is now running",
+        )
+        return any(stripped.startswith(prefix) for prefix in prefixes)
+
+    def clean_response_output(self, output: str) -> str:
+        lines = [line for line in output.splitlines() if not self.is_service_output_line(line)]
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        return "\n".join(lines).strip()
 
     def split_knowledge_warnings(self, output: str) -> tuple[str, list[str]]:
         warnings: list[str] = []
@@ -1026,7 +1141,59 @@ class KnowledgeChatApp:
                     warnings.append(warning)
             else:
                 display_lines.append(line)
-        return "\n".join(display_lines).strip(), warnings
+        return self.clean_response_output("\n".join(display_lines)), warnings
+
+    def storage_name_for_scope(self, scope: str, project: str) -> str:
+        safe_project = re.sub(r"[^a-z0-9_-]+", "-", project.strip().lower()) or "default"
+        if scope == "all":
+            return "all"
+        if scope == "game":
+            return f"game_{safe_project}"
+        return scope
+
+    def lightrag_index_state(self, scope: str, project: str) -> str:
+        storage_name = self.storage_name_for_scope(scope, project)
+        storage_path = ROOT / "LightRAG" / f"rag_storage_{storage_name}" / "vdb_chunks.json"
+        return "индекс найден" if storage_path.exists() else "индекс пока не найден"
+
+    def local_intent_response(self, question: str, context_name: str, scope: str, project: str) -> str | None:
+        text = compact_text(question)
+        question_words = len(re.findall(r"\w+", text, flags=re.UNICODE))
+
+        health_checks = {
+            "проверка связи",
+            "проверь связь",
+            "тест",
+            "test",
+            "ping",
+            "на связи?",
+            "ты на связи?",
+            "работаешь?",
+            "работает?",
+        }
+        greetings = {"привет", "hello", "hi", "здравствуй", "здравствуйте"}
+        if text in health_checks:
+            state = "LightRAG включен" if self.lightrag_var.get() else "LightRAG выключен"
+            return f"На связи. {state}."
+        if text in greetings:
+            return "Привет. Можно задать вопрос по базе знаний или добавить заметку/ссылку."
+
+        if "lightrag" in text and question_words <= 6:
+            state = "включен" if self.lightrag_var.get() else "выключен"
+            index_state = self.lightrag_index_state(scope, project)
+            return f"LightRAG {state}. Для контекста {context_name}: {index_state}."
+
+        if "vault" in text or "obsidian" in text:
+            if any(term in text for term in ("зачем", "для чего", "открыть", "что такое")):
+                return "Vault открывает папку заметок для ручного просмотра и правки. Спрашивать можно прямо здесь."
+
+        if any(term in text for term in ("можно спрашивать", "только для добавления", "что умеешь", "зачем этот чат")):
+            return "Можно спрашивать по базе знаний и добавлять заметки/ссылки. Основной сценарий — вопрос-ответ."
+
+        if question_words <= 2 and not URL_RE.search(question):
+            return "Уточните, что именно нужно найти или объяснить по этой теме."
+
+        return None
 
     def input_text(self) -> str:
         return self.input.get("1.0", "end").strip()
@@ -1108,36 +1275,31 @@ class KnowledgeChatApp:
     def show_history(self) -> None:
         entries = self.load_history_entries(limit=40)
         if not entries:
-            self.set_chat_text("System: История пока пустая.\n", "system")
+            self.set_chat_text("История пока пустая.\n", "system")
             self.intro_visible = False
             return
 
         self.intro_visible = False
         self.chat.configure(state="normal")
         self.chat.delete("1.0", "end")
-        self.chat.insert("end", "System: Последние сообщения из локальной истории.\n\n", "system")
+        self.chat_widgets.clear()
+        self.chat.configure(state="disabled")
+        self.append_warning_message("Последние сообщения из локальной истории.")
         for entry in entries:
             role = str(entry.get("role", "assistant"))
-            context_name = str(entry.get("context", ""))
             text = str(entry.get("text", "")).strip()
-            ts = str(entry.get("ts", ""))[:16].replace("T", " ")
             warnings = entry.get("warnings") if isinstance(entry.get("warnings"), list) else []
             if not text and not warnings:
                 continue
-            tag = "user" if role == "user" else "assistant"
-            if role in {"warning", "error"}:
-                tag = role
-            header = role.capitalize()
-            if context_name:
-                header = f"{header} [{context_name}]"
-            if ts:
-                header = f"{header} · {ts}"
             for warning in warnings:
-                self.chat.insert("end", f"{warning}\n", "warning")
+                self.append_warning_message(str(warning))
             if text:
-                self.chat.insert("end", f"{header}:\n{text}\n\n", tag)
-        self.chat.configure(state="disabled")
-        self.chat.see("end")
+                if role == "user":
+                    self.append_user_message(text)
+                elif role == "error":
+                    self.append_assistant_message(text, "error")
+                else:
+                    self.append_assistant_message(text, "assistant")
 
     def set_active_process(self, process: subprocess.Popen | None) -> None:
         with self.process_lock:
@@ -1200,9 +1362,9 @@ class KnowledgeChatApp:
             return
         stopped = self.terminate_active_process()
         if stopped:
-            self.append("Операция отменена. Кнопки снова активны.\n", "warning")
+            self.status_var.set("Canceled")
         else:
-            self.append("Активный процесс не найден, но интерфейс разблокирован.\n", "warning")
+            self.status_var.set("Ready")
         self.active_operation_id = None
         self.set_busy(False, "Ready")
 
@@ -1282,10 +1444,17 @@ class KnowledgeChatApp:
         lightrag_enabled = bool(self.lightrag_var.get())
         if not lightrag_enabled:
             route_note = f"{route_note}, LightRAG off"
-        self.append(f"You [{route_note}]:\n{question}\n", "user")
+        self.append_user_message(question)
         self.record_history("user", context_name, question)
         self.remember_input(question)
         self.clear_input()
+
+        local_response = self.local_intent_response(question, context_name, scope, project)
+        if local_response:
+            self.append_assistant_message(local_response)
+            self.record_history("assistant", context_name, local_response)
+            return
+
         operation_id = self.begin_operation(f"Asking {context_name}...", self.query_timeout_seconds)
 
         thread = threading.Thread(
@@ -1325,7 +1494,10 @@ class KnowledgeChatApp:
             returncode, output = self.run_command(command, self.query_timeout_seconds, env=env)
             output, warnings = self.split_knowledge_warnings(output)
             if not output:
-                output = f"Command exited with code {returncode} and no output."
+                if returncode == 0:
+                    output = "Готово, но модель вернула пустой ответ."
+                else:
+                    output = "Не удалось получить ответ. Проверь, что LM Studio запущен и локальный сервер доступен."
             tag = "assistant" if returncode == 0 else "error"
         except TimeoutError as exc:
             output = f"{exc}\nЗапрос остановлен, чтобы чат не зависал. Попробуйте еще раз или откройте LightRAG-Control."
@@ -1349,8 +1521,8 @@ class KnowledgeChatApp:
         if not self.is_active_operation(operation_id):
             return
         for warning in warnings or []:
-            self.append(f"{warning}\n", "warning")
-        self.append(f"Assistant [{context_name}]:\n{output}\n", tag)
+            self.append_warning_message(warning)
+        self.append_assistant_message(output, tag)
         self.record_history("assistant" if tag == "assistant" else "error", context_name, output, warnings)
         self.set_busy(False, "Ready")
 
