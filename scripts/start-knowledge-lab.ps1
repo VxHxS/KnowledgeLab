@@ -1,5 +1,7 @@
 $ErrorActionPreference = "Stop"
 
+$Root = Split-Path -Parent $PSScriptRoot
+$GameGuard = Join-Path $PSScriptRoot "game-guard.ps1"
 $Lms = Join-Path $env:USERPROFILE ".lmstudio\bin\lms.exe"
 $LlmModelKey = $env:LMSTUDIO_MODEL_KEY
 if (-not $LlmModelKey) { $LlmModelKey = "qwen/qwen3-14b" }
@@ -48,6 +50,14 @@ function Test-ModelLoaded {
 
 if (-not (Test-Path -LiteralPath $Lms)) {
     throw "LM Studio CLI was not found at $Lms"
+}
+
+if (Test-Path -LiteralPath $GameGuard) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $GameGuard -Once
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Knowledge Lab AI startup was blocked by Game Guard." -ForegroundColor Yellow
+        exit $LASTEXITCODE
+    }
 }
 
 Write-Host "Starting LM Studio server..."

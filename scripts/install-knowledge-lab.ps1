@@ -524,7 +524,7 @@ function Write-InstallReport {
     $lines.Add("- Desktop control: $DesktopDir\LightRAG-Control.lnk") | Out-Null
     $lines.Add("- Desktop logic: $DesktopLogicDir") | Out-Null
     $lines.Add("- Web vault: $Root\Obsidian-Test-Vault\20 Projects\Web Development") | Out-Null
-    $lines.Add("- Reindex web: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ingest-vault-scope-lmstudio.ps1 -Scope web -Project web-development") | Out-Null
+    $lines.Add("- Manual maintenance indexing: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ingest-vault-scope-lmstudio.ps1 -Scope web -Project web-development") | Out-Null
 
     if (-not $DryRun) {
         $lines | Set-Content -LiteralPath $ReportPath -Encoding UTF8

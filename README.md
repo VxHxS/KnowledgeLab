@@ -6,14 +6,16 @@ KnowledgeLab is a local-first personal knowledge system for Windows. It connects
 
 - Stores knowledge as Markdown in an Obsidian vault.
 - Imports and organizes sources such as YouTube links, Telegram exports, articles, project notes, and web-development snippets.
-- Builds LightRAG indexes from selected vault scopes.
+- Builds missing LightRAG indexes automatically when a scope is first used.
 - Queries the vault through LightRAG before sending context to the local LLM.
 - Uses LM Studio as an OpenAI-compatible local API.
 - Provides a desktop chat launcher for everyday use.
-- Provides a desktop control launcher for checks, reindexing, opening the vault, and stopping local models.
+- Provides a desktop control launcher for checks, maintenance indexing, opening the vault, stopping local models, and Game Guard.
 - Shows a small gray warning in chat when no LightRAG context was found and the answer had to fall back to plain LLM mode.
 - Lets the user turn LightRAG retrieval on or off from the chat UI. LightRAG is on by default.
-- Keeps a local chat history in `tmp/knowledge-chat-history.jsonl`.
+- Keeps local chat history in `tmp/knowledge-chat-history.jsonl` and chat settings in `tmp/knowledge-chat-settings.json`.
+- Saves chat preferences for Enter-to-send, LightRAG, main button color, and Game Guard.
+- Protects games such as Crimson Desert with Game Guard, which can unload LM Studio models before they steal RAM/VRAM.
 
 ## Main Entry Points
 
@@ -78,7 +80,7 @@ Obsidian Markdown
 | `web` | `web-development` | `LightRAG/rag_storage_web` | Web-development notes, snippets, frontend/backend solutions and sources |
 | `game` | `my-game` | `LightRAG/rag_storage_game_my-game` | A personal game-project knowledge base |
 
-Reindex examples:
+Manual maintenance indexing examples:
 
 ```powershell
 scripts\ingest-vault-scope-lmstudio.ps1 -Scope general
@@ -92,8 +94,25 @@ The chat window starts with a short temporary hint. It disappears as soon as the
 
 - `Context` routes questions to `Auto`, `General`, `Web Development`, or `My Game`.
 - `LightRAG` toggles retrieval on or off. On is the normal mode.
+- `Settings` opens a small preferences window for Enter-to-send, LightRAG, button color, and Game Guard.
+- If the selected LightRAG index is missing, the chat starts indexing in the background and answers through plain LM Studio for that turn.
+- `Enter` sends by default; `Shift+Enter` inserts a new line. This can be changed in Settings.
 - `History` shows recent local messages from `tmp/knowledge-chat-history.jsonl`.
+- `Cancel` stops a stuck request and restores the buttons without restarting the app.
+- `Open Obsidian` opens the vault folder for manual review or editing of notes.
 - A gray warning line appears when the answer was generated without knowledge-base context.
+
+## Game Guard
+
+Game Guard prevents local AI models from competing with games for RAM/VRAM.
+
+```powershell
+scripts\game-guard.ps1 -Watch
+scripts\game-guard.ps1 -InstallStartup -StartNow
+scripts\game-guard.ps1 -UninstallStartup -StopNow
+```
+
+The chat Settings window can turn Game Guard on or off. On installs a Windows Startup watcher and starts it now; off removes Startup and stops the background watcher. `scripts\start-knowledge-lab.ps1` also checks Game Guard once before loading models. If Crimson Desert is already running and Game Guard is enabled, KnowledgeLab does not load Qwen.
 
 ## Query Diagnostics
 
@@ -165,4 +184,4 @@ Generated runtime artifacts are intentionally ignored:
 - `tmp`
 - downloaded model archives
 
-Recreate indexes locally with the ingest scripts after cloning or moving the project.
+Indexes are created automatically on first use. Use the ingest scripts or LightRAG Control only for manual maintenance.

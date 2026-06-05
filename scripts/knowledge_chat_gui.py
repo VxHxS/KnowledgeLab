@@ -8,7 +8,7 @@ import subprocess
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import colorchooser, messagebox, ttk
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +16,9 @@ VAULT_DIR = ROOT / "Obsidian-Test-Vault"
 SCRIPTS_DIR = ROOT / "scripts"
 QUERY_SCRIPT = SCRIPTS_DIR / "query-vault-scope-lmstudio.ps1"
 INGEST_SCRIPT = SCRIPTS_DIR / "ingest-vault-scope-lmstudio.ps1"
+GAME_GUARD_SCRIPT = SCRIPTS_DIR / "game-guard.ps1"
 CHAT_HISTORY_PATH = ROOT / "tmp" / "knowledge-chat-history.jsonl"
+SETTINGS_PATH = ROOT / "tmp" / "knowledge-chat-settings.json"
 
 CONTEXTS = {
     "General": ("general", ""),
@@ -28,6 +30,20 @@ URL_RE = re.compile(r"https?://[^\s<>)\]]+", re.IGNORECASE)
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s<>)\]]+|youtu\.be/[^\s<>)\]]+)", re.IGNORECASE)
 TELEGRAM_RE = re.compile(r"https?://t\.me/[^\s<>)\]]+", re.IGNORECASE)
 WARNING_PREFIX = "::knowledge-warning "
+
+BUTTON_COLOR_PRESETS = {
+    "Blue": "#3d5f88",
+    "Green": "#4f746e",
+    "Purple": "#6f608a",
+    "Graphite": "#58616b",
+}
+
+DEFAULT_SETTINGS = {
+    "send_on_enter": True,
+    "use_lightrag": True,
+    "button_color": BUTTON_COLOR_PRESETS["Blue"],
+    "game_guard_enabled": True,
+}
 
 WEB_TERMS = {
     "web",
@@ -201,6 +217,12 @@ class RoundedButton(tk.Canvas):
 
     config = configure
 
+    def set_colors(self, *, bg: str, active_bg: str, fg: str) -> None:
+        self.normal_bg = bg
+        self.active_bg = active_bg
+        self.fg = fg
+        self.redraw()
+
     def on_enter(self, _event: tk.Event | None = None) -> None:
         self.hover = True
         self.redraw()
@@ -345,6 +367,33 @@ def unique_path(path: Path) -> Path:
     raise RuntimeError(f"Cannot create a unique filename for {path}")
 
 
+def valid_hex_color(value: str, fallback: str) -> str:
+    value = str(value or "").strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+        return value.lower()
+    return fallback
+
+
+def adjust_hex_color(value: str, factor: float) -> str:
+    value = valid_hex_color(value, BUTTON_COLOR_PRESETS["Blue"]).lstrip("#")
+    channels = [int(value[index:index + 2], 16) for index in (0, 2, 4)]
+    adjusted = []
+    for channel in channels:
+        if factor >= 1:
+            channel = int(channel + (255 - channel) * (factor - 1))
+        else:
+            channel = int(channel * factor)
+        adjusted.append(max(0, min(255, channel)))
+    return "#{:02x}{:02x}{:02x}".format(*adjusted)
+
+
+def readable_text_color(background: str) -> str:
+    value = valid_hex_color(background, BUTTON_COLOR_PRESETS["Blue"]).lstrip("#")
+    r, g, b = [int(value[index:index + 2], 16) for index in (0, 2, 4)]
+    luminance = (0.299 * r + 0.587 * g + 0.114 * b)
+    return "#1f2933" if luminance > 150 else "#ffffff"
+
+
 def capture_destination(scope: str, topic: str, kind: str) -> Path:
     if scope == "web":
         base = VAULT_DIR / "20 Projects" / "Web Development"
@@ -442,18 +491,35 @@ class KnowledgeChatApp:
         self.root.minsize(820, 560)
         self.root.configure(bg="#f4f6f8")
 
+        self.settings = self.load_settings()
         self.context_var = tk.StringVar(value="Auto")
-        self.lightrag_var = tk.BooleanVar(value=True)
+        self.lightrag_var = tk.BooleanVar(value=bool(self.settings["use_lightrag"]))
         self.status_var = tk.StringVar(value="Ready")
+        self.settings_window: tk.Toplevel | None = None
+        self.settings_status_var = tk.StringVar(value="")
+        self.enter_send_var = tk.BooleanVar(value=bool(self.settings["send_on_enter"]))
+        self.game_guard_var = tk.BooleanVar(value=bool(self.settings["game_guard_enabled"]))
+        self.button_color_var = tk.StringVar(value=str(self.settings["button_color"]))
         self.tooltips: list[ToolTip] = []
         self.intro_visible = False
         self.input_history: list[str] = []
         self.input_history_index = 0
+        self.active_process: subprocess.Popen | None = None
+        self.process_lock = threading.Lock()
+        self.busy = False
+        self.operation_id = 0
+        self.active_operation_id: int | None = None
+        self.busy_timer_id: str | None = None
+        self.query_timeout_seconds = int(os.getenv("LMSTUDIO_GUI_QUERY_TIMEOUT_SECONDS", "600"))
+        self.reindex_timeout_seconds = int(os.getenv("LMSTUDIO_GUI_REINDEX_TIMEOUT_SECONDS", "1800"))
 
         self.configure_styles()
         self.build_ui()
         self.load_input_history()
         self.show_intro()
+        self.apply_settings_to_ui()
+        if self.settings["game_guard_enabled"]:
+            self.configure_game_guard_background(True, silent=True)
 
     def configure_styles(self) -> None:
         style = ttk.Style()
@@ -462,8 +528,46 @@ class KnowledgeChatApp:
         style.configure("Composer.TFrame", background="#f4f6f8")
         style.configure("Status.TLabel", background="#eef2f5", foreground="#53616f", font=("Segoe UI", 10))
         style.configure("Header.TLabel", background="#eef2f5", foreground="#1f2933", font=("Segoe UI Semibold", 11))
+        style.configure("SettingsHeader.TLabel", background="#f4f6f8", foreground="#1f2933", font=("Segoe UI Semibold", 10))
+        style.configure("SettingsStatus.TLabel", background="#f4f6f8", foreground="#53616f", font=("Segoe UI", 9))
         style.configure("Context.TLabel", background="#eef2f5", foreground="#384655", font=("Segoe UI", 10))
         style.configure("Toolbar.TCheckbutton", background="#eef2f5", foreground="#384655", font=("Segoe UI", 10))
+
+    def load_settings(self) -> dict[str, object]:
+        settings = dict(DEFAULT_SETTINGS)
+        try:
+            if SETTINGS_PATH.exists():
+                loaded = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    settings.update(loaded)
+        except (OSError, json.JSONDecodeError):
+            pass
+
+        settings["send_on_enter"] = bool(settings.get("send_on_enter", DEFAULT_SETTINGS["send_on_enter"]))
+        settings["use_lightrag"] = bool(settings.get("use_lightrag", DEFAULT_SETTINGS["use_lightrag"]))
+        settings["game_guard_enabled"] = bool(settings.get("game_guard_enabled", DEFAULT_SETTINGS["game_guard_enabled"]))
+        settings["button_color"] = valid_hex_color(
+            str(settings.get("button_color", DEFAULT_SETTINGS["button_color"])),
+            str(DEFAULT_SETTINGS["button_color"]),
+        )
+        return settings
+
+    def save_settings(self) -> None:
+        self.settings["send_on_enter"] = bool(self.settings["send_on_enter"])
+        self.settings["use_lightrag"] = bool(self.settings["use_lightrag"])
+        self.settings["game_guard_enabled"] = bool(self.settings["game_guard_enabled"])
+        self.settings["button_color"] = valid_hex_color(
+            str(self.settings["button_color"]),
+            str(DEFAULT_SETTINGS["button_color"]),
+        )
+        try:
+            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS_PATH.write_text(
+                json.dumps(self.settings, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
 
     def build_ui(self) -> None:
         self.root.columnconfigure(0, weight=1)
@@ -471,7 +575,7 @@ class KnowledgeChatApp:
 
         toolbar = ttk.Frame(self.root, padding=(14, 10), style="Top.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.columnconfigure(4, weight=1)
+        toolbar.columnconfigure(5, weight=1)
 
         ttk.Label(toolbar, text="LightRAG Chat", style="Header.TLabel").grid(row=0, column=0, padx=(0, 18))
         ttk.Label(toolbar, text="Контекст", style="Context.TLabel").grid(row=0, column=1, padx=(0, 6))
@@ -501,7 +605,11 @@ class KnowledgeChatApp:
             "On: answer uses LightRAG retrieval. Off: answer comes directly from LM Studio and shows a gray warning.",
         )
 
-        ttk.Label(toolbar, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=5, sticky="e")
+        self.settings_button = ttk.Button(toolbar, text="Настройки", command=self.open_settings)
+        self.settings_button.grid(row=0, column=4, padx=(0, 14))
+        self.add_tooltip(self.settings_button, "Открыть настройки Enter, LightRAG, цвета кнопок и Game Guard.")
+
+        ttk.Label(toolbar, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=6, sticky="e")
 
         main = ttk.Frame(self.root, padding=(14, 12, 14, 14), style="App.TFrame")
         main.grid(row=1, column=0, sticky="nsew")
@@ -562,7 +670,9 @@ class KnowledgeChatApp:
             font=("Segoe UI", 10),
         )
         self.input.grid(row=0, column=0, sticky="ew")
-        self.input.bind("<Control-Return>", lambda _event: self.on_send())
+        self.input.bind("<Control-Return>", self.on_ctrl_return)
+        self.input.bind("<Shift-Return>", self.on_shift_return)
+        self.input.bind("<Return>", self.on_return)
         self.input.bind("<Alt-Up>", lambda _event: self.navigate_input_history(-1))
         self.input.bind("<Alt-Down>", lambda _event: self.navigate_input_history(1))
 
@@ -594,26 +704,30 @@ class KnowledgeChatApp:
             self.save_button,
             "Создать Markdown-заметку из текущего текста/ссылки. YouTube, Telegram и web-ссылки раскладываются по нужным папкам Obsidian.",
         )
-        self.reindex_button = self.create_action_button(
+        self.cancel_button = self.create_action_button(
             button_bar,
-            "Переиндексировать",
-            self.on_reindex,
-            bg="#6f6388",
-            active_bg="#5b5070",
-            fg="#ffffff",
+            "Отмена",
+            self.cancel_active_operation,
+            bg="#dfe6ed",
+            active_bg="#d2dbe4",
+            fg="#1f2933",
         )
-        self.reindex_button.grid(row=0, column=2, sticky="ew", padx=7, ipady=7)
-        self.add_tooltip(self.reindex_button, "Пересобрать LightRAG-индекс для текущего контекста. Может занять время.")
+        self.cancel_button.grid(row=0, column=2, sticky="ew", padx=7, ipady=7)
+        self.cancel_button.configure(state="disabled")
+        self.add_tooltip(self.cancel_button, "Остановить зависший запрос и вернуть кнопки в рабочее состояние.")
         self.open_button = self.create_action_button(
             button_bar,
-            "Открыть Vault",
+            "Открыть Obsidian",
             self.open_vault,
             bg="#dfe6ed",
             active_bg="#d2dbe4",
             fg="#1f2933",
         )
         self.open_button.grid(row=0, column=3, sticky="ew", padx=7, ipady=7)
-        self.add_tooltip(self.open_button, "Открыть папку Obsidian vault в проводнике Windows.")
+        self.add_tooltip(
+            self.open_button,
+            "Открыть папку Obsidian vault, чтобы вручную посмотреть, поправить или проверить сохраненные заметки и источники.",
+        )
         self.history_button = self.create_action_button(
             button_bar,
             "История",
@@ -657,6 +771,215 @@ class KnowledgeChatApp:
     def add_tooltip(self, widget: tk.Widget, text: str) -> None:
         self.tooltips.append(ToolTip(widget, text))
 
+    def apply_settings_to_ui(self) -> None:
+        self.enter_send_var.set(bool(self.settings["send_on_enter"]))
+        self.lightrag_var.set(bool(self.settings["use_lightrag"]))
+        self.game_guard_var.set(bool(self.settings["game_guard_enabled"]))
+        self.button_color_var.set(str(self.settings["button_color"]))
+        self.update_button_colors()
+        self.on_lightrag_toggle(save=False)
+
+    def update_button_colors(self) -> None:
+        color = valid_hex_color(str(self.settings["button_color"]), str(DEFAULT_SETTINGS["button_color"]))
+        fg = readable_text_color(color)
+        active_bg = adjust_hex_color(color, 0.86)
+        for button in (self.send_button, self.save_button):
+            button.set_colors(bg=color, active_bg=active_bg, fg=fg)
+
+    def open_settings(self) -> None:
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.lift()
+            self.settings_window.focus_force()
+            return
+
+        self.enter_send_var.set(bool(self.settings["send_on_enter"]))
+        self.lightrag_var.set(bool(self.settings["use_lightrag"]))
+        self.game_guard_var.set(bool(self.settings["game_guard_enabled"]))
+        self.button_color_var.set(str(self.settings["button_color"]))
+        self.settings_status_var.set("")
+
+        window = tk.Toplevel(self.root)
+        self.settings_window = window
+        window.title("Настройки LightRAG Chat")
+        window.transient(self.root)
+        window.resizable(False, False)
+        window.configure(bg="#f4f6f8")
+        window.protocol("WM_DELETE_WINDOW", self.close_settings)
+
+        frame = ttk.Frame(window, padding=(18, 16), style="App.TFrame")
+        frame.grid(row=0, column=0, sticky="nsew")
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Отправка и база знаний", style="SettingsHeader.TLabel").grid(
+            row=0,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(0, 10),
+        )
+        ttk.Checkbutton(
+            frame,
+            text="Enter отправляет сообщение",
+            variable=self.enter_send_var,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=3)
+        ttk.Checkbutton(
+            frame,
+            text="Использовать LightRAG",
+            variable=self.lightrag_var,
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=3)
+        ttk.Checkbutton(
+            frame,
+            text="Game Guard работает в фоне",
+            variable=self.game_guard_var,
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=3)
+
+        ttk.Separator(frame, orient="horizontal").grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+        ttk.Label(frame, text="Цвет основных кнопок", style="SettingsHeader.TLabel").grid(
+            row=5,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(0, 10),
+        )
+
+        preset_var = tk.StringVar(value=self.color_preset_name(self.button_color_var.get()))
+        presets = list(BUTTON_COLOR_PRESETS.keys())
+        preset = ttk.Combobox(frame, textvariable=preset_var, values=presets, state="readonly", width=18)
+        preset.grid(row=6, column=0, sticky="w", padx=(0, 10))
+        preset.bind("<<ComboboxSelected>>", lambda _event: self.select_color_preset(preset_var.get()))
+
+        self.settings_color_preview = tk.Label(
+            frame,
+            width=6,
+            height=1,
+            background=self.button_color_var.get(),
+            relief="solid",
+            borderwidth=1,
+        )
+        self.settings_color_preview.grid(row=6, column=1, sticky="w", padx=(0, 10))
+        ttk.Button(frame, text="Выбрать...", command=self.choose_button_color).grid(row=6, column=2, sticky="e")
+
+        ttk.Label(frame, textvariable=self.settings_status_var, style="SettingsStatus.TLabel").grid(
+            row=7,
+            column=0,
+            columnspan=3,
+            sticky="w",
+            pady=(14, 0),
+        )
+
+        buttons = ttk.Frame(frame, style="App.TFrame")
+        buttons.grid(row=8, column=0, columnspan=3, sticky="e", pady=(16, 0))
+        ttk.Button(buttons, text="Отмена", command=self.close_settings).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(buttons, text="Сохранить", command=self.save_settings_from_window).grid(row=0, column=1)
+
+        window.update_idletasks()
+        x = self.root.winfo_rootx() + max(30, (self.root.winfo_width() - window.winfo_width()) // 2)
+        y = self.root.winfo_rooty() + max(30, (self.root.winfo_height() - window.winfo_height()) // 3)
+        window.geometry(f"+{x}+{y}")
+
+    def close_settings(self) -> None:
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.destroy()
+        self.settings_window = None
+
+    def color_preset_name(self, color: str) -> str:
+        color = valid_hex_color(color, str(DEFAULT_SETTINGS["button_color"]))
+        for name, value in BUTTON_COLOR_PRESETS.items():
+            if value.lower() == color.lower():
+                return name
+        return ""
+
+    def select_color_preset(self, preset_name: str) -> None:
+        color = BUTTON_COLOR_PRESETS.get(preset_name)
+        if not color:
+            return
+        self.button_color_var.set(color)
+        self.update_color_preview(color)
+
+    def update_color_preview(self, color: str) -> None:
+        if hasattr(self, "settings_color_preview") and self.settings_color_preview:
+            self.settings_color_preview.configure(background=valid_hex_color(color, str(DEFAULT_SETTINGS["button_color"])))
+
+    def choose_button_color(self) -> None:
+        _rgb, color = colorchooser.askcolor(
+            color=valid_hex_color(self.button_color_var.get(), str(DEFAULT_SETTINGS["button_color"])),
+            parent=self.settings_window or self.root,
+            title="Цвет основных кнопок",
+        )
+        if not color:
+            return
+        self.button_color_var.set(valid_hex_color(color, str(DEFAULT_SETTINGS["button_color"])))
+        self.update_color_preview(self.button_color_var.get())
+
+    def save_settings_from_window(self) -> None:
+        old_game_guard = bool(self.settings["game_guard_enabled"])
+        self.settings["send_on_enter"] = bool(self.enter_send_var.get())
+        self.settings["use_lightrag"] = bool(self.lightrag_var.get())
+        self.settings["button_color"] = valid_hex_color(self.button_color_var.get(), str(DEFAULT_SETTINGS["button_color"]))
+        self.settings["game_guard_enabled"] = bool(self.game_guard_var.get())
+        self.save_settings()
+        self.apply_settings_to_ui()
+
+        if old_game_guard != bool(self.settings["game_guard_enabled"]):
+            self.configure_game_guard_background(bool(self.settings["game_guard_enabled"]), silent=False)
+        else:
+            self.status_var.set("Settings saved")
+        self.close_settings()
+
+    def configure_game_guard_background(self, enabled: bool, silent: bool = False) -> None:
+        if not GAME_GUARD_SCRIPT.exists():
+            if not silent:
+                self.status_var.set("Game Guard script missing")
+            return
+
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(GAME_GUARD_SCRIPT),
+        ]
+        if enabled:
+            command.extend(["-InstallStartup", "-StartNow"])
+        else:
+            command.extend(["-UninstallStartup", "-StopNow"])
+
+        def worker() -> None:
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                result = subprocess.run(
+                    command,
+                    cwd=str(ROOT),
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=30,
+                    creationflags=creationflags,
+                )
+                output = "\n".join(
+                    part for part in ((result.stdout or "").strip(), (result.stderr or "").strip()) if part
+                )
+                self.root.after(0, self.finish_game_guard_config, enabled, result.returncode, output, silent)
+            except Exception as exc:
+                self.root.after(0, self.finish_game_guard_config, enabled, 1, str(exc), silent)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_game_guard_config(self, enabled: bool, returncode: int, output: str, silent: bool) -> None:
+        if returncode == 0:
+            if not silent:
+                self.status_var.set("Game Guard on" if enabled else "Game Guard off")
+            return
+        message = f"Game Guard не удалось {'включить' if enabled else 'выключить'}."
+        if output:
+            message = f"{message} {output.splitlines()[-1]}"
+        if not silent:
+            self.append(f"{message}\n", "warning")
+            self.status_var.set("Game Guard warning")
+
     def set_chat_text(self, text: str, tag: str = "system") -> None:
         self.chat.configure(state="normal")
         self.chat.delete("1.0", "end")
@@ -667,9 +990,10 @@ class KnowledgeChatApp:
     def show_intro(self) -> None:
         self.intro_visible = True
         intro = (
-            "System: Контекст выбирается автоматически. Ctrl+Enter отправляет сообщение.\n"
-            "LightRAG включен по умолчанию; переключатель сверху позволяет сравнить ответ без базы знаний.\n"
-            "История сохраняет последние сообщения локально и доступна кнопкой ниже.\n"
+            "System: Здесь можно задавать вопросы по базе знаний и добавлять новые заметки/ссылки.\n"
+            "Контекст выбирается автоматически. Enter отправляет сообщение, Shift+Enter добавляет новую строку; это можно изменить в настройках.\n"
+            "LightRAG включен по умолчанию; если индекс еще не готов, он соберется в фоне, а ответ все равно появится.\n"
+            "Obsidian открывает папку заметок для ручного просмотра и правки.\n"
         )
         self.set_chat_text(intro, "system")
 
@@ -815,21 +1139,140 @@ class KnowledgeChatApp:
         self.chat.configure(state="disabled")
         self.chat.see("end")
 
+    def set_active_process(self, process: subprocess.Popen | None) -> None:
+        with self.process_lock:
+            self.active_process = process
+
+    def terminate_active_process(self) -> bool:
+        with self.process_lock:
+            process = self.active_process
+        if not process or process.poll() is not None:
+            return False
+
+        try:
+            process.terminate()
+            try:
+                process.wait(timeout=4)
+            except subprocess.TimeoutExpired:
+                process.kill()
+            return True
+        except Exception:
+            try:
+                process.kill()
+                return True
+            except Exception:
+                return False
+
+    def cancel_busy_timer(self) -> None:
+        if self.busy_timer_id:
+            try:
+                self.root.after_cancel(self.busy_timer_id)
+            except tk.TclError:
+                pass
+            self.busy_timer_id = None
+
+    def schedule_busy_timer(self, timeout_seconds: int) -> None:
+        self.cancel_busy_timer()
+        self.busy_timer_id = self.root.after((timeout_seconds + 5) * 1000, self.force_unlock_timeout)
+
+    def begin_operation(self, status: str, timeout_seconds: int) -> int:
+        self.operation_id += 1
+        self.active_operation_id = self.operation_id
+        self.set_busy(True, status)
+        self.schedule_busy_timer(timeout_seconds)
+        return self.operation_id
+
+    def is_active_operation(self, operation_id: int) -> bool:
+        return self.active_operation_id == operation_id
+
+    def force_unlock_timeout(self) -> None:
+        if not self.busy:
+            return
+        self.terminate_active_process()
+        self.append(
+            "Операция заняла слишком много времени и была остановлена. Кнопки снова активны; можно отправить сообщение еще раз.\n",
+            "warning",
+        )
+        self.set_busy(False, "Ready")
+
+    def cancel_active_operation(self) -> None:
+        if not self.busy:
+            return
+        stopped = self.terminate_active_process()
+        if stopped:
+            self.append("Операция отменена. Кнопки снова активны.\n", "warning")
+        else:
+            self.append("Активный процесс не найден, но интерфейс разблокирован.\n", "warning")
+        self.active_operation_id = None
+        self.set_busy(False, "Ready")
+
+    def run_command(self, command: list[str], timeout_seconds: int, env: dict[str, str] | None = None) -> tuple[int, str]:
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        process = subprocess.Popen(
+            command,
+            cwd=str(ROOT),
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=creationflags,
+            env=env,
+        )
+        self.set_active_process(process)
+        try:
+            stdout, stderr = process.communicate(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            self.terminate_active_process()
+            raise TimeoutError(f"Command timed out after {timeout_seconds} seconds.")
+        finally:
+            self.set_active_process(None)
+
+        output = "\n".join(part for part in ((stdout or "").strip(), (stderr or "").strip()) if part)
+        return process.returncode, output
+
     def set_busy(self, busy: bool, status: str) -> None:
+        self.busy = busy
         state = "disabled" if busy else "normal"
         self.send_button.configure(state=state)
         self.save_button.configure(state=state)
-        self.reindex_button.configure(state=state)
+        self.cancel_button.configure(state="normal" if busy else "disabled")
         self.history_button.configure(state=state)
+        self.open_button.configure(state=state)
+        self.clear_button.configure(state=state)
+        if not busy:
+            self.cancel_busy_timer()
+            self.set_active_process(None)
+            self.active_operation_id = None
         self.status_var.set(status)
 
     def selected_route(self, text: str) -> tuple[str, str, str]:
         return route_context(text, self.context_var.get())
 
-    def on_lightrag_toggle(self) -> None:
+    def on_lightrag_toggle(self, save: bool = True) -> None:
+        if save:
+            self.settings["use_lightrag"] = bool(self.lightrag_var.get())
+            self.save_settings()
         self.status_var.set("LightRAG on" if self.lightrag_var.get() else "LightRAG off")
+        if self.settings_window and self.settings_window.winfo_exists():
+            self.lightrag_var.set(bool(self.settings["use_lightrag"]))
+
+    def on_ctrl_return(self, _event: tk.Event | None = None) -> str:
+        self.on_send()
+        return "break"
+
+    def on_shift_return(self, _event: tk.Event | None = None) -> None:
+        return None
+
+    def on_return(self, _event: tk.Event | None = None) -> str | None:
+        if bool(self.settings["send_on_enter"]):
+            self.on_send()
+            return "break"
+        return None
 
     def on_send(self) -> None:
+        if self.busy:
+            return
         question = self.input_text()
         if not question:
             return
@@ -843,17 +1286,18 @@ class KnowledgeChatApp:
         self.record_history("user", context_name, question)
         self.remember_input(question)
         self.clear_input()
-        self.set_busy(True, f"Asking {context_name}...")
+        operation_id = self.begin_operation(f"Asking {context_name}...", self.query_timeout_seconds)
 
         thread = threading.Thread(
             target=self.run_query,
-            args=(question, context_name, scope, project, lightrag_enabled),
+            args=(operation_id, question, context_name, scope, project, lightrag_enabled),
             daemon=True,
         )
         thread.start()
 
     def run_query(
         self,
+        operation_id: int,
         question: str,
         context_name: str,
         scope: str,
@@ -874,34 +1318,36 @@ class KnowledgeChatApp:
             command.extend(["-Project", project])
         command.append(question)
 
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         env = dict(os.environ)
         env["LMSTUDIO_GUI_OUTPUT"] = "1"
         env["LMSTUDIO_USE_LIGHTRAG"] = "1" if lightrag_enabled else "0"
         try:
-            result = subprocess.run(
-                command,
-                cwd=str(ROOT),
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                creationflags=creationflags,
-                env=env,
-            )
-            output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+            returncode, output = self.run_command(command, self.query_timeout_seconds, env=env)
             output, warnings = self.split_knowledge_warnings(output)
             if not output:
-                output = f"Command exited with code {result.returncode} and no output."
-            tag = "assistant" if result.returncode == 0 else "error"
+                output = f"Command exited with code {returncode} and no output."
+            tag = "assistant" if returncode == 0 else "error"
+        except TimeoutError as exc:
+            output = f"{exc}\nЗапрос остановлен, чтобы чат не зависал. Попробуйте еще раз или откройте LightRAG-Control."
+            tag = "warning"
+            warnings = []
         except Exception as exc:
             output = f"ERROR: {exc}"
             tag = "error"
             warnings = []
 
-        self.root.after(0, self.finish_query, context_name, output, tag, warnings)
+        self.root.after(0, self.finish_query, operation_id, context_name, output, tag, warnings)
 
-    def finish_query(self, context_name: str, output: str, tag: str, warnings: list[str] | None = None) -> None:
+    def finish_query(
+        self,
+        operation_id: int,
+        context_name: str,
+        output: str,
+        tag: str,
+        warnings: list[str] | None = None,
+    ) -> None:
+        if not self.is_active_operation(operation_id):
+            return
         for warning in warnings or []:
             self.append(f"{warning}\n", "warning")
         self.append(f"Assistant [{context_name}]:\n{output}\n", tag)
@@ -942,11 +1388,11 @@ class KnowledgeChatApp:
         ):
             return
 
-        self.set_busy(True, f"Reindexing {context_name}...")
-        thread = threading.Thread(target=self.run_reindex, args=(context_name, scope, project), daemon=True)
+        operation_id = self.begin_operation(f"Reindexing {context_name}...", self.reindex_timeout_seconds)
+        thread = threading.Thread(target=self.run_reindex, args=(operation_id, context_name, scope, project), daemon=True)
         thread.start()
 
-    def run_reindex(self, context_name: str, scope: str, project: str) -> None:
+    def run_reindex(self, operation_id: int, context_name: str, scope: str, project: str) -> None:
         command = [
             "powershell",
             "-NoProfile",
@@ -960,26 +1406,21 @@ class KnowledgeChatApp:
         if project:
             command.extend(["-Project", project])
 
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
-            result = subprocess.run(
-                command,
-                cwd=str(ROOT),
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                capture_output=True,
-                creationflags=creationflags,
-            )
-            output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
-            tag = "assistant" if result.returncode == 0 else "error"
+            returncode, output = self.run_command(command, self.reindex_timeout_seconds)
+            tag = "assistant" if returncode == 0 else "error"
+        except TimeoutError as exc:
+            output = f"{exc}\nИндексация остановлена, чтобы чат не зависал. Ее можно повторить из LightRAG-Control."
+            tag = "warning"
         except Exception as exc:
             output = f"ERROR: {exc}"
             tag = "error"
 
-        self.root.after(0, self.finish_reindex, context_name, output, tag)
+        self.root.after(0, self.finish_reindex, operation_id, context_name, output, tag)
 
-    def finish_reindex(self, context_name: str, output: str, tag: str) -> None:
+    def finish_reindex(self, operation_id: int, context_name: str, output: str, tag: str) -> None:
+        if not self.is_active_operation(operation_id):
+            return
         self.append(f"Reindex [{context_name}]:\n{output}\n", tag)
         self.set_busy(False, "Ready")
 

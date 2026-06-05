@@ -65,6 +65,9 @@ function Get-ScriptDescription {
         "^08 Reindex LightRAG Scope\.cmd$|^Reindex-LightRAG-Scope\.ps1$" {
             return "Строит отдельный LightRAG-индекс для выбранного scope: all, general или game."
         }
+        "^09 Game Guard\.cmd$|^Game-Guard\.ps1$" {
+            return "Следит за Crimson Desert и автоматически выгружает LM Studio/Qwen, чтобы освободить RAM/VRAM для игры."
+        }
 default {
             return "Запускает файл $($Script.Name) из папки LightRag."
         }
@@ -297,7 +300,8 @@ if (Test-Path -LiteralPath $LauncherDir) {
                 "05 Import Telegram Export.cmd",
                 "06 Ask General Knowledge.cmd",
                 "07 Ask My Game.cmd",
-                "08 Reindex LightRAG Scope.cmd"
+                "08 Reindex LightRAG Scope.cmd",
+                "09 Game Guard.cmd"
             )
         } |
         Sort-Object Name

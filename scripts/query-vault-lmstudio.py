@@ -46,6 +46,10 @@ REQUIRE_CONTEXT = env_flag("LMSTUDIO_REQUIRE_CONTEXT", False)
 FALLBACK_WITH_WARNING = env_flag("LMSTUDIO_FALLBACK_WITH_WARNING", True)
 SHOW_RETRIEVAL = env_flag("LMSTUDIO_SHOW_RETRIEVAL", False)
 USE_LIGHTRAG = env_flag("LMSTUDIO_USE_LIGHTRAG", True)
+LIGHTRAG_OFF_REASON = os.getenv(
+    "LMSTUDIO_LIGHTRAG_OFF_REASON",
+    "LightRAG выключен вручную; ответ создан без поиска по базе знаний.",
+)
 ENABLE_LLM_CACHE = env_flag("LMSTUDIO_ENABLE_LLM_CACHE", False)
 EMBEDDING_CLIENT = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
 
@@ -116,7 +120,7 @@ async def main() -> None:
         response = await plain_lmstudio_answer(question)
         if not response:
             raise RuntimeError("LM Studio returned an empty answer.")
-        emit_warning("LightRAG выключен вручную; ответ создан без поиска по базе знаний.")
+        emit_warning(LIGHTRAG_OFF_REASON)
         print(response)
         return
 

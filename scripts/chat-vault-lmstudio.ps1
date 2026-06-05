@@ -30,16 +30,7 @@ if ($Scope -eq "game") {
 
 if (-not (Test-Path -LiteralPath (Join-Path $StoragePath "vdb_chunks.json"))) {
     Write-Host ""
-    Write-Host "LightRAG storage is not indexed yet." -ForegroundColor Yellow
-    $RunIngest = Read-Host "Run reindex now? [y/N]"
-    if ($RunIngest -notin @("y", "Y", "yes", "YES")) {
-        if ($Scope -eq "game") {
-            Write-Host "Run later: scripts\ingest-vault-scope-lmstudio.ps1 -Scope game -Project $Project" -ForegroundColor Yellow
-        } else {
-            Write-Host "Run later: scripts\ingest-vault-scope-lmstudio.ps1 -Scope $Scope" -ForegroundColor Yellow
-        }
-        exit 2
-    }
+    Write-Host "LightRAG storage is not indexed yet. Building it now..." -ForegroundColor Yellow
 
     if ($Scope -eq "game") {
         & (Join-Path $PSScriptRoot "ingest-vault-scope-lmstudio.ps1") -Scope $Scope -Project $Project
@@ -47,6 +38,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $StoragePath "vdb_chunks.json"))) {
         & (Join-Path $PSScriptRoot "ingest-vault-scope-lmstudio.ps1") -Scope $Scope -Project $Project
     } else {
         & (Join-Path $PSScriptRoot "ingest-vault-scope-lmstudio.ps1") -Scope $Scope
+    }
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
     }
 }
 

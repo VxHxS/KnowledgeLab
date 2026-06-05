@@ -1,4 +1,4 @@
-param(
+﻿param(
     [switch] $SmokeTest
 )
 
@@ -11,15 +11,30 @@ Add-Type -AssemblyName System.Drawing
 
 $AppName = "LightRAG Control"
 $ScriptHome = Split-Path -Parent $MyInvocation.MyCommand.Path
-$DesktopLauncherDir = Join-Path ([Environment]::GetFolderPath("Desktop")) "LightRag"
-$LauncherDir = $ScriptHome
-if (-not (Test-Path -LiteralPath (Join-Path $LauncherDir "01 Check LightRAG.cmd")) -and
-    (Test-Path -LiteralPath (Join-Path $DesktopLauncherDir "01 Check LightRAG.cmd"))) {
-    $LauncherDir = $DesktopLauncherDir
+$DesktopLauncherDir = Join-Path (Join-Path ([Environment]::GetFolderPath("Desktop")) "LightRag") "LightRAG-Control"
+$LauncherCandidates = @($ScriptHome, $DesktopLauncherDir, (Split-Path -Parent $ScriptHome))
+$LauncherDir = $LauncherCandidates |
+    Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $_ "01 Check LightRAG.cmd")) } |
+    Select-Object -First 1
+if (-not $LauncherDir) {
+    $LauncherDir = $ScriptHome
 }
 
-$LabDir = "C:\MyFiles\KnowledgeLab"
-$VaultDir = Join-Path $LabDir "Obsidian-Test-Vault"
+$PathHelper = Join-Path $ScriptHome "Resolve-LightRAG-Paths.ps1"
+$LabDir = $null
+$VaultDir = $null
+if (Test-Path -LiteralPath $PathHelper) {
+    . $PathHelper
+    try {
+        $ResolvedPaths = Get-LightRAGPaths -StartDir $ScriptHome
+        $LabDir = $ResolvedPaths.Root
+        $VaultDir = $ResolvedPaths.Vault
+    }
+    catch {
+        $LabDir = $null
+        $VaultDir = $null
+    }
+}
 $LmsPath = Join-Path $env:USERPROFILE ".lmstudio\bin\lms.exe"
 
 function Get-ScriptDescription {
@@ -50,7 +65,10 @@ function Get-ScriptDescription {
         "^08 Reindex LightRAG Scope\.cmd$|^Reindex-LightRAG-Scope\.ps1$" {
             return "Строит отдельный LightRAG-индекс для выбранного scope: all, general или game."
         }
-        default {
+        "^09 Game Guard\.cmd$|^Game-Guard\.ps1$" {
+            return "Следит за Crimson Desert и автоматически выгружает LM Studio/Qwen, чтобы освободить RAM/VRAM для игры."
+        }
+default {
             return "Запускает файл $($Script.Name) из папки LightRag."
         }
     }
@@ -278,7 +296,12 @@ if (Test-Path -LiteralPath $LauncherDir) {
                 "01 Check LightRAG.cmd",
                 "02 Ask Obsidian Vault.cmd",
                 "03 Stop AI.cmd",
-                "04 Open Obsidian Vault.cmd"
+                "04 Open Obsidian Vault.cmd",
+                "05 Import Telegram Export.cmd",
+                "06 Ask General Knowledge.cmd",
+                "07 Ask My Game.cmd",
+                "08 Reindex LightRAG Scope.cmd",
+                "09 Game Guard.cmd"
             )
         } |
         Sort-Object Name
