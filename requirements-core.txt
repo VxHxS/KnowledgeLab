@@ -1,0 +1,6 @@
+lightrag-hku==1.4.16
+nano-vectordb==0.0.4.3
+numpy>=2.0
+openai>=2.0
+tiktoken>=0.13
+

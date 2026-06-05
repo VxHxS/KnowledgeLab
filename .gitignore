@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Local virtual environments and installed tools
+.venv/
+LightRAG/.venv/
+
+# Local environment and secrets
+.env
+*.env
+LightRAG/.env
+!LightRAG/.env.lmstudio.example
+
+# Generated LightRAG indexes and caches
+LightRAG/rag_storage*/
+LightRAG/**/kv_store_llm_response_cache.json
+
+# Downloaded model/runtime artifacts
+Ollama/
+*.zip
+*.7z
+*.gguf
+*.safetensors
+
+# Temporary and generated local files
+tmp/
+INSTALL_REPORT.md
+.telegram-sync/
+
+# Obsidian local UI state
+Obsidian-Test-Vault/.obsidian/workspace.json
+
+# Desktop packaging backups and accidental nested clones
+LightRAG-Desktop/KnowledgeLab/
+LightRAG-Desktop/**/.codex-backup*/
+LightRAG-Desktop/**/.codex-backup-*/
+LightRAG-Desktop/**/.codex-backup-no-youtube-*/
+
+# OS/editor noise
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,54 @@
+param(
+    [ValidateSet("all", "general", "game", "web")]
+    [string] $Scope = "general",
+    [string] $Project = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+$Root = Split-Path -Parent $PSScriptRoot
+$Python = Join-Path $Root "LightRAG\.venv\Scripts\python.exe"
+$SafeProject = $Project.Trim().ToLower() -replace "[^a-z0-9_-]+", "-"
+if (-not $SafeProject) { $SafeProject = "default" }
+$StorageName = if ($Scope -eq "all") { "all" } elseif ($Scope -eq "game") { "game_$SafeProject" } else { $Scope }
+$StorageRel = "LightRAG\rag_storage_$StorageName"
+$StoragePath = Join-Path $Root $StorageRel
+
+$env:PYTHONUTF8 = "1"
+$env:LMSTUDIO_SCOPE = $Scope
+$env:LMSTUDIO_PROJECT = if ($Scope -in @("game", "web")) { $Project } else { "" }
+$env:LMSTUDIO_RAG_DIR = $StorageRel
+
+Write-Host "LightRAG chat over Obsidian vault" -ForegroundColor Cyan
+Write-Host "Scope: $Scope"
+if ($Scope -eq "game") {
+    if (-not $Project) { $Project = "my-game" }
+    Write-Host "Project: $Project"
+} elseif ($Scope -eq "web" -and $Project) {
+    Write-Host "Project: $Project"
+}
+
+if (-not (Test-Path -LiteralPath (Join-Path $StoragePath "vdb_chunks.json"))) {
+    Write-Host ""
+    Write-Host "LightRAG storage is not indexed yet." -ForegroundColor Yellow
+    $RunIngest = Read-Host "Run reindex now? [y/N]"
+    if ($RunIngest -notin @("y", "Y", "yes", "YES")) {
+        if ($Scope -eq "game") {
+            Write-Host "Run later: scripts\ingest-vault-scope-lmstudio.ps1 -Scope game -Project $Project" -ForegroundColor Yellow
+        } else {
+            Write-Host "Run later: scripts\ingest-vault-scope-lmstudio.ps1 -Scope $Scope" -ForegroundColor Yellow
+        }
+        exit 2
+    }
+
+    if ($Scope -eq "game") {
+        & (Join-Path $PSScriptRoot "ingest-vault-scope-lmstudio.ps1") -Scope $Scope -Project $Project
+    } elseif ($Scope -eq "web" -and $Project) {
+        & (Join-Path $PSScriptRoot "ingest-vault-scope-lmstudio.ps1") -Scope $Scope -Project $Project
+    } else {
+        & (Join-Path $PSScriptRoot "ingest-vault-scope-lmstudio.ps1") -Scope $Scope
+    }
+}
+
+& (Join-Path $PSScriptRoot "start-knowledge-lab.ps1")
+& $Python (Join-Path $PSScriptRoot "chat-vault-lmstudio.py")
