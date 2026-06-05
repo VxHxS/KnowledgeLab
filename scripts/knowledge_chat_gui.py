@@ -40,9 +40,10 @@ BUTTON_COLOR_PRESETS = {
 
 DEFAULT_SETTINGS = {
     "send_on_enter": True,
-    "use_lightrag": True,
+    "use_lightrag": False,
     "button_color": BUTTON_COLOR_PRESETS["Blue"],
     "game_guard_enabled": True,
+    "default_llm_mode_applied": True,
 }
 
 WEB_TERMS = {
@@ -545,12 +546,18 @@ class KnowledgeChatApp:
                 loaded = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict):
                     settings.update(loaded)
+                    if "default_llm_mode_applied" not in loaded:
+                        settings["use_lightrag"] = False
+                        settings["default_llm_mode_applied"] = True
         except (OSError, json.JSONDecodeError):
             pass
 
         settings["send_on_enter"] = bool(settings.get("send_on_enter", DEFAULT_SETTINGS["send_on_enter"]))
         settings["use_lightrag"] = bool(settings.get("use_lightrag", DEFAULT_SETTINGS["use_lightrag"]))
         settings["game_guard_enabled"] = bool(settings.get("game_guard_enabled", DEFAULT_SETTINGS["game_guard_enabled"]))
+        settings["default_llm_mode_applied"] = bool(
+            settings.get("default_llm_mode_applied", DEFAULT_SETTINGS["default_llm_mode_applied"])
+        )
         settings["button_color"] = valid_hex_color(
             str(settings.get("button_color", DEFAULT_SETTINGS["button_color"])),
             str(DEFAULT_SETTINGS["button_color"]),
@@ -561,6 +568,7 @@ class KnowledgeChatApp:
         self.settings["send_on_enter"] = bool(self.settings["send_on_enter"])
         self.settings["use_lightrag"] = bool(self.settings["use_lightrag"])
         self.settings["game_guard_enabled"] = bool(self.settings["game_guard_enabled"])
+        self.settings["default_llm_mode_applied"] = True
         self.settings["button_color"] = valid_hex_color(
             str(self.settings["button_color"]),
             str(DEFAULT_SETTINGS["button_color"]),
@@ -1189,9 +1197,6 @@ class KnowledgeChatApp:
 
         if any(term in text for term in ("можно спрашивать", "только для добавления", "что умеешь", "зачем этот чат")):
             return "Можно спрашивать по базе знаний и добавлять заметки/ссылки. Основной сценарий — вопрос-ответ."
-
-        if question_words <= 2 and not URL_RE.search(question):
-            return "Уточните, что именно нужно найти или объяснить по этой теме."
 
         return None
 

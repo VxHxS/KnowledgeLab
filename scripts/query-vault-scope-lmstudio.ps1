@@ -7,6 +7,8 @@
 )
 
 $ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 $Root = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $Root "LightRAG\.venv\Scripts\python.exe"
@@ -114,16 +116,37 @@ if ($UseLightRag -and -not (Test-Path -LiteralPath (Join-Path $StoragePath "vdb_
         Write-KnowledgeWarning "LightRAG индекс для '$Scope' пока отсутствует; ответ будет создан без базы знаний."
     }
     $env:LMSTUDIO_USE_LIGHTRAG = "0"
+    $env:LMSTUDIO_WARN_PLAIN_MODE = "1"
     $env:LMSTUDIO_LIGHTRAG_OFF_REASON = "LightRAG индекс для '$Scope' пока не готов; этот ответ создан без контекста базы знаний."
     $UseLightRag = $false
 }
 
 $StartScript = Join-Path $PSScriptRoot "start-knowledge-lab.ps1"
 if (Test-GuiOutput) {
-    $startupOutput = @(& $StartScript 2>&1)
-    if ($LASTEXITCODE -ne 0) {
+    $startupOutput = @()
+    $startupExitCode = 0
+    $tmpDir = Join-Path $Root "tmp"
+    New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
+    $startupLog = Join-Path $tmpDir ("startup-gui-{0}.log" -f ([Guid]::NewGuid().ToString("N")))
+    $oldErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        & $StartScript *> $startupLog
+        $startupExitCode = $LASTEXITCODE
+    }
+    catch {
+        $startupOutput += $_
+        $startupExitCode = 1
+    }
+    finally {
+        $ErrorActionPreference = $oldErrorActionPreference
+        if ($startupExitCode -eq 0) {
+            Remove-Item -LiteralPath $startupLog -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($startupExitCode -ne 0) {
         Write-KnowledgeWarning "Не удалось подготовить LM Studio. Проверь, что LM Studio запущен и доступен на http://127.0.0.1:1234."
-        exit $LASTEXITCODE
+        exit $startupExitCode
     }
 } else {
     & $StartScript

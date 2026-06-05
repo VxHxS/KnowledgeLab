@@ -120,7 +120,8 @@ async def main() -> None:
         response = await plain_lmstudio_answer(question)
         if not response:
             raise RuntimeError("LM Studio returned an empty answer.")
-        emit_warning(LIGHTRAG_OFF_REASON)
+        if env_flag("LMSTUDIO_WARN_PLAIN_MODE", False):
+            emit_warning(LIGHTRAG_OFF_REASON)
         print(response)
         return
 
