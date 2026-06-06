@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,7 +32,6 @@ SETTINGS_PATH = Path(os.getenv("KNOWLEDGELAB_CHAT_SETTINGS_PATH", str(ROOT / "tm
 OBSIDIAN_ICON = ROOT / "assets" / "icons" / "Obsidian.png"
 NEW_CHAT_ICON = ROOT / "assets" / "icons" / "new-chat.png"
 WEB_SEARCH_ICON = ROOT / "assets" / "icons" / "web-search.png"
-RENAME_CHAT_ICON = ROOT / "assets" / "icons" / "rename-chat.png"
 LMSTUDIO_API_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 DEFAULT_LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
 DEFAULT_EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
@@ -46,6 +46,13 @@ URL_RE = re.compile(r"https?://[^\s<>)\]]+", re.IGNORECASE)
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s<>)\]]+|youtu\.be/[^\s<>)\]]+)", re.IGNORECASE)
 TELEGRAM_RE = re.compile(r"https?://t\.me/[^\s<>)\]]+", re.IGNORECASE)
 WARNING_PREFIX = "::knowledge-warning "
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+IMAGE_FILETYPES = [
+    ("Images", "*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff"),
+    ("PNG", "*.png"),
+    ("JPEG", "*.jpg *.jpeg"),
+    ("All files", "*.*"),
+]
 
 BUTTON_COLOR_PRESETS = {
     "Blue": "#3d5f88",
@@ -292,60 +299,19 @@ class RoundedButton(tk.Canvas):
 
 
 class IconButton(tk.Canvas):
-    def __init__(self, parent: tk.Widget, image: tk.PhotoImage, command, *, size: int = 34, background: str = "#eef2f5") -> None:
-        super().__init__(
-            parent,
-            width=size,
-            height=size,
-            background=background,
-            highlightthickness=0,
-            bd=0,
-            cursor="hand2",
-            takefocus=True,
-        )
-        self.image = image
-        self.command = command
-        self.size = size
-        self.hover = False
-        self.bind("<Enter>", self.on_enter)
-        self.bind("<Leave>", self.on_leave)
-        self.bind("<ButtonRelease-1>", self.on_click)
-        self.bind("<space>", self.on_keyboard)
-        self.bind("<Return>", self.on_keyboard)
-        self.redraw()
-
-    def on_enter(self, _event: tk.Event | None = None) -> None:
-        self.hover = True
-        self.redraw()
-
-    def on_leave(self, _event: tk.Event | None = None) -> None:
-        self.hover = False
-        self.redraw()
-
-    def on_click(self, _event: tk.Event | None = None) -> None:
-        if self.command:
-            self.command()
-
-    def on_keyboard(self, _event: tk.Event | None = None) -> str:
-        self.on_click()
-        return "break"
-
-    def redraw(self) -> None:
-        self.delete("all")
-        if self.hover:
-            self.create_rectangle(1, 1, self.size - 1, self.size - 1, outline="#8b72d6", width=1)
-        self.create_image(self.size // 2, self.size // 2, image=self.image)
-
-
-class WebSearchToggleButton(tk.Canvas):
     def __init__(
         self,
         parent: tk.Widget,
+        image: tk.PhotoImage,
         command,
         *,
-        image: tk.PhotoImage | None = None,
-        size: int = 42,
-        background: str = "#ffffff",
+        size: int = 34,
+        background: str = "#eef2f5",
+        hover_bg: str = "#f6f8fb",
+        pressed_bg: str = "#e8f0fe",
+        outline: str = "#cfd7e2",
+        active_outline: str = "#7aa2ff",
+        radius: int = 9,
     ) -> None:
         super().__init__(
             parent,
@@ -357,13 +323,99 @@ class WebSearchToggleButton(tk.Canvas):
             cursor="hand2",
             takefocus=True,
         )
-        self.command = command
         self.image = image
+        self.command = command
         self.size = size
-        self.active = False
+        self.normal_bg = background
+        self.hover_bg = hover_bg
+        self.pressed_bg = pressed_bg
+        self.outline = outline
+        self.active_outline = active_outline
+        self.radius = radius
         self.hover = False
+        self.pressed = False
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
+        self.bind("<ButtonPress-1>", self.on_press)
+        self.bind("<ButtonRelease-1>", self.on_click)
+        self.bind("<space>", self.on_keyboard)
+        self.bind("<Return>", self.on_keyboard)
+        self.redraw()
+
+    def on_enter(self, _event: tk.Event | None = None) -> None:
+        self.hover = True
+        self.redraw()
+
+    def on_leave(self, _event: tk.Event | None = None) -> None:
+        self.hover = False
+        self.pressed = False
+        self.redraw()
+
+    def on_press(self, _event: tk.Event | None = None) -> None:
+        if str(self.cget("state")) == "disabled":
+            return
+        self.pressed = True
+        self.redraw()
+
+    def on_click(self, _event: tk.Event | None = None) -> None:
+        if str(self.cget("state")) == "disabled":
+            return
+        self.pressed = False
+        self.redraw()
+        if self.command:
+            self.command()
+
+    def on_keyboard(self, _event: tk.Event | None = None) -> str:
+        self.on_click()
+        return "break"
+
+    def redraw(self) -> None:
+        self.delete("all")
+        fill = self.pressed_bg if self.pressed else (self.hover_bg if self.hover else self.normal_bg)
+        outline = self.active_outline if self.pressed or self.hover else self.normal_bg
+        self.rounded_rect(1, 1, self.size - 1, self.size - 1, self.radius, fill=fill, outline=outline)
+        self.create_image(self.size // 2, self.size // 2, image=self.image)
+
+    def rounded_rect(self, x1: int, y1: int, x2: int, y2: int, radius: int, *, fill: str, outline: str) -> None:
+        points = [
+            x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
+            x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
+            x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
+        ]
+        self.create_polygon(points, smooth=True, fill=fill, outline=outline)
+
+
+class WebSearchToggleButton(tk.Canvas):
+    def __init__(
+        self,
+        parent: tk.Widget,
+        command,
+        *,
+        image: tk.PhotoImage | None = None,
+        width: int = 46,
+        height: int = 30,
+        background: str = "#ffffff",
+    ) -> None:
+        super().__init__(
+            parent,
+            width=width,
+            height=height,
+            background=background,
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+            takefocus=True,
+        )
+        self.command = command
+        self.image = image
+        self.width_value = width
+        self.height_value = height
+        self.active = False
+        self.hover = False
+        self.pressed = False
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+        self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<ButtonRelease-1>", self.on_click)
         self.bind("<space>", self.on_keyboard)
         self.bind("<Return>", self.on_keyboard)
@@ -379,9 +431,20 @@ class WebSearchToggleButton(tk.Canvas):
 
     def on_leave(self, _event: tk.Event | None = None) -> None:
         self.hover = False
+        self.pressed = False
+        self.redraw()
+
+    def on_press(self, _event: tk.Event | None = None) -> None:
+        if str(self.cget("state")) == "disabled":
+            return
+        self.pressed = True
         self.redraw()
 
     def on_click(self, _event: tk.Event | None = None) -> None:
+        if str(self.cget("state")) == "disabled":
+            return
+        self.pressed = False
+        self.redraw()
         if self.command:
             self.command()
 
@@ -391,22 +454,34 @@ class WebSearchToggleButton(tk.Canvas):
 
     def redraw(self) -> None:
         self.delete("all")
-        size = self.size
-        bg = "#e8f0fe" if self.active else "#ffffff"
-        outline = "#1a73e8" if self.active else ("#8ea2b5" if self.hover else "#cfd4da")
+        width = self.width_value
+        height = self.height_value
+        bg = "#dce8ff" if self.pressed else ("#e8f0fe" if self.active else ("#f7f9fc" if self.hover else "#ffffff"))
+        outline = "#7aa2ff" if self.pressed else ("#8fb4ff" if self.active else ("#c9d2dc" if self.hover else "#d8dde4"))
         icon = "#1a73e8" if self.active else "#384655"
-        self.create_rectangle(0, 0, size, size, fill=bg, outline="")
-        self.create_rectangle(1, 1, size - 1, size - 1, outline=outline if self.active or self.hover else "#ffffff", width=1)
+        self.create_rectangle(0, 0, width, height, fill="#ffffff", outline="")
+        self.rounded_rect(1, 1, width - 1, height - 1, height // 2 - 1, fill=bg, outline=outline)
         if self.image:
-            self.create_image(size // 2, size // 2, image=self.image)
+            self.create_image(width // 2, height // 2, image=self.image)
         else:
-            self.create_oval(7, 7, size - 7, size - 7, outline=outline, width=2)
-            self.create_arc(10, 7, size - 10, size - 7, start=90, extent=180, outline=icon, width=1)
-            self.create_arc(10, 7, size - 10, size - 7, start=270, extent=180, outline=icon, width=1)
-            self.create_line(7, size // 2, size - 7, size // 2, fill=icon, width=1)
-            self.create_line(size // 2, 8, size // 2, size - 8, fill=icon, width=1)
+            cx = width // 2
+            cy = height // 2
+            radius = min(width, height) // 2 - 8
+            self.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, outline=icon, width=1)
+            self.create_arc(cx - radius + 3, cy - radius, cx + radius - 3, cy + radius, start=90, extent=180, outline=icon, width=1)
+            self.create_arc(cx - radius + 3, cy - radius, cx + radius - 3, cy + radius, start=270, extent=180, outline=icon, width=1)
+            self.create_line(cx - radius, cy, cx + radius, cy, fill=icon, width=1)
+            self.create_line(cx, cy - radius, cx, cy + radius, fill=icon, width=1)
         if self.active:
-            self.create_oval(size - 12, 8, size - 6, 14, fill="#34a853", outline="")
+            self.create_oval(width - 10, 7, width - 5, 12, fill="#34a853", outline="")
+
+    def rounded_rect(self, x1: int, y1: int, x2: int, y2: int, radius: int, *, fill: str, outline: str) -> None:
+        points = [
+            x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
+            x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
+            x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
+        ]
+        self.create_polygon(points, smooth=True, fill=fill, outline=outline)
 
 
 def now_iso() -> str:
@@ -549,6 +624,8 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
             return base / "Sources" / "Telegram"
         if kind == "article":
             return base / "Sources" / "Articles"
+        if kind == "image_capture":
+            return base / "Sources" / "Images"
         if kind == "solution":
             return base / "Solutions"
         return base / "Topics" / clean_filename(topic)
@@ -560,6 +637,8 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
             return base / "Sources" / "Telegram"
         if kind == "article":
             return base / "Sources" / "Articles"
+        if kind == "image_capture":
+            return base / "Sources" / "Images"
         return base / "Captures"
     if kind == "youtube_link":
         return VAULT_DIR / "30 Sources" / "YouTube" / "Links"
@@ -567,6 +646,8 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
         return VAULT_DIR / "30 Sources" / "Telegram"
     if kind == "article":
         return VAULT_DIR / "30 Sources" / "Articles"
+    if kind == "image_capture":
+        return VAULT_DIR / "00 Inbox" / "Images"
     return VAULT_DIR / "00 Inbox"
 
 
@@ -607,6 +688,61 @@ def render_capture_markdown(text: str, context_name: str, scope: str, project: s
     if url:
         body.extend([f"URL: {url}", ""])
     body.extend(["## Capture", "", text.strip(), ""])
+    return "\n".join(frontmatter + body)
+
+
+def render_image_capture_markdown(
+    image_path: Path,
+    caption: str,
+    context_name: str,
+    scope: str,
+    project: str,
+    topic: str,
+) -> str:
+    stat = image_path.stat()
+    tags = ["captured/chat", "source/image", "needs/vision-extraction"]
+    if project:
+        tags.append(f"project/{project}")
+    if topic:
+        tags.append(f"topic/{slugify(topic)}")
+    title_seed = caption.strip() or image_path.stem
+    title = clean_filename(title_seed)
+    frontmatter = [
+        "---",
+        "type: image_capture",
+        "source: image",
+        f"source_path: {yaml_quote(str(image_path))}",
+        f"file_name: {yaml_quote(image_path.name)}",
+        f"file_size_bytes: {stat.st_size}",
+        f"scope: {scope}",
+        f"project: {yaml_quote(project)}",
+        f"topic: {yaml_quote(topic)}",
+        f"captured_at: {yaml_quote(now_iso())}",
+        "extraction_status: pending",
+        f"tags: [{', '.join(tags)}]",
+        "---",
+        "",
+    ]
+    body = [
+        f"# {title}",
+        "",
+        "## Image Intake",
+        "",
+        f"- Original file: `{image_path}`",
+        f"- File name: `{image_path.name}`",
+        f"- Size: {stat.st_size} bytes",
+        f"- Suggested context: {context_name}",
+        f"- Suggested topic: {topic or 'None'}",
+        "",
+        "## Caption / User Hint",
+        "",
+        caption.strip() or "_No caption was provided._",
+        "",
+        "## Extracted Data",
+        "",
+        "_Pending OCR/vision extraction. The heavy image file is not copied into the vault by default._",
+        "",
+    ]
     return "\n".join(frontmatter + body)
 
 
@@ -921,9 +1057,12 @@ class KnowledgeChatApp:
         self.obsidian_image: tk.PhotoImage | None = None
         self.new_chat_image: tk.PhotoImage | None = None
         self.web_search_image: tk.PhotoImage | None = None
-        self.rename_chat_image: tk.PhotoImage | None = None
         self.chat_widgets: list[tk.Widget] = []
         self.chat_row_widgets: list[tk.Widget] = []
+        self.inline_rename_entry: tk.Entry | None = None
+        self.inline_rename_chat_id = ""
+        self.inline_rename_original = ""
+        self.inline_rename_ignore_click_until = 0.0
         self.input_history: list[str] = []
         self.input_history_index = 0
         self.active_process: subprocess.Popen | None = None
@@ -943,6 +1082,7 @@ class KnowledgeChatApp:
 
         self.configure_styles()
         self.build_ui()
+        self.root.bind_all("<Button-1>", self.on_inline_rename_global_click, add="+")
         self.populate_chat_list()
         self.render_current_chat()
         self.load_input_history()
@@ -1101,6 +1241,65 @@ class KnowledgeChatApp:
                 return chat
         return None
 
+    def begin_inline_rename(self, chat_id: str, row: tk.Frame, title_label: tk.Label) -> str:
+        chat = self.chat_by_id(chat_id)
+        if not chat:
+            return "break"
+        if self.inline_rename_entry:
+            self.finish_inline_rename(save=True)
+        self.inline_rename_chat_id = chat_id
+        self.inline_rename_original = str(chat.get("title") or "Чат")
+        self.inline_rename_ignore_click_until = time.time() + 0.25
+        title_label.grid_remove()
+        entry = tk.Entry(
+            row,
+            relief="flat",
+            borderwidth=0,
+            bg="#ffffff",
+            fg="#1f2933",
+            insertbackground="#1f2933",
+            font=("Segoe UI", 9),
+        )
+        entry.insert(0, self.inline_rename_original)
+        entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.inline_rename_entry = entry
+        entry.bind("<Return>", lambda _event: self.finish_inline_rename(save=True) or "break")
+        entry.bind("<Escape>", lambda _event: self.finish_inline_rename(save=False) or "break")
+        entry.bind("<FocusOut>", lambda _event: self.finish_inline_rename(save=True))
+        self.bind_history_mousewheel(entry)
+        entry.focus_set()
+        entry.select_range(0, "end")
+        return "break"
+
+    def finish_inline_rename(self, save: bool = True) -> None:
+        entry = self.inline_rename_entry
+        chat_id = self.inline_rename_chat_id
+        original = self.inline_rename_original
+        self.inline_rename_entry = None
+        self.inline_rename_chat_id = ""
+        self.inline_rename_original = ""
+        self.inline_rename_ignore_click_until = 0.0
+        if not entry:
+            return
+        title = entry.get().strip()
+        if save and title:
+            chat = self.chat_by_id(chat_id)
+            if chat and title != original:
+                chat["title"] = title[:80]
+                chat["updated_at"] = now_iso()
+                self.save_chat_store()
+        self.populate_chat_list(keep_selection=True)
+
+    def on_inline_rename_global_click(self, event: tk.Event) -> None:
+        entry = self.inline_rename_entry
+        if not entry:
+            return
+        if time.time() < self.inline_rename_ignore_click_until:
+            return
+        if event.widget == entry:
+            return
+        self.finish_inline_rename(save=True)
+
     def create_chat(self, save: bool = True) -> None:
         chat_id = self.new_id("chat")
         chat = {
@@ -1239,6 +1438,7 @@ class KnowledgeChatApp:
         if not chats:
             empty = tk.Label(self.chat_rows, text="Нет чатов", bg="#eef2f5", fg="#8a939d", anchor="w", font=("Segoe UI", 9))
             empty.grid(row=0, column=0, sticky="ew", padx=12, pady=8)
+            self.bind_history_mousewheel(empty)
             self.chat_row_widgets.append(empty)
             return
 
@@ -1260,6 +1460,7 @@ class KnowledgeChatApp:
                 font=("Segoe UI", 8),
             )
             section.grid(row=row_index, column=0, sticky="ew", padx=14, pady=(12 if row_index else 4, 4))
+            self.bind_history_mousewheel(section)
             self.chat_row_widgets.append(section)
             row_index += 1
 
@@ -1288,16 +1489,14 @@ class KnowledgeChatApp:
             title_label.grid(row=0, column=0, sticky="ew")
             age = tk.Label(row, text=self.format_chat_age(str(chat.get("updated_at", ""))), bg=row_bg, fg="#7a838c", font=("Segoe UI", 8))
             age.grid(row=0, column=1, sticky="e", padx=(6, 4))
-            if self.rename_chat_image:
-                rename = IconButton(row, self.rename_chat_image, lambda cid=chat_id: self.rename_chat_by_id(cid), size=24, background=row_bg)
-            else:
-                rename = tk.Button(row, text="✎", width=2, relief="flat", bg=row_bg, activebackground="#d4dde6", command=lambda cid=chat_id: self.rename_chat_by_id(cid))
-            rename.grid(row=0, column=2, sticky="e", padx=(2, 0))
-            self.add_tooltip(rename, "Переименовать чат.")
             delete = tk.Button(row, text="×", width=2, relief="flat", bg=row_bg, activebackground="#d4dde6", command=lambda cid=chat_id: self.delete_chat_by_id(cid))
-            delete.grid(row=0, column=3, sticky="e", padx=(2, 0))
+            delete.grid(row=0, column=2, sticky="e", padx=(2, 0))
             for child in (row, title_label, age):
                 child.bind("<Button-1>", lambda _event, cid=chat_id: self.select_chat(cid))
+                child.bind("<Double-Button-1>", lambda _event, cid=chat_id, r=row, label=title_label: self.begin_inline_rename(cid, r, label))
+                self.bind_history_mousewheel(child)
+            self.bind_history_mousewheel(delete)
+            self.add_tooltip(title_label, "Двойной клик, чтобы переименовать чат.")
             self.chat_row_widgets.append(row)
 
     def on_chat_select(self, _event: tk.Event | None = None) -> None:
@@ -1318,7 +1517,6 @@ class KnowledgeChatApp:
         self.root.rowconfigure(1, weight=1)
         self.new_chat_image = self.load_icon_image(NEW_CHAT_ICON, 22)
         self.web_search_image = self.load_icon_image(WEB_SEARCH_ICON, 26)
-        self.rename_chat_image = self.load_icon_image(RENAME_CHAT_ICON, 18)
 
         toolbar = ttk.Frame(self.root, padding=(14, 10), style="Top.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew")
@@ -1384,6 +1582,8 @@ class KnowledgeChatApp:
         self.chat_rows_window = self.chat_rows_canvas.create_window((0, 0), window=self.chat_rows, anchor="nw")
         self.chat_rows.bind("<Configure>", lambda _event: self.chat_rows_canvas.configure(scrollregion=self.chat_rows_canvas.bbox("all")))
         self.chat_rows_canvas.bind("<Configure>", lambda event: self.chat_rows_canvas.itemconfigure(self.chat_rows_window, width=event.width))
+        for widget in (sidebar, self.chat_rows_canvas, self.chat_rows):
+            self.bind_history_mousewheel(widget)
 
         chat_area = ttk.Frame(main, style="App.TFrame")
         chat_area.grid(row=0, column=1, sticky="nsew")
@@ -1424,6 +1624,7 @@ class KnowledgeChatApp:
         input_shell.grid(row=0, column=0, sticky="ew")
         input_shell.columnconfigure(0, weight=1)
         input_shell.columnconfigure(1, weight=0)
+        input_shell.columnconfigure(2, weight=0)
 
         self.input = tk.Text(
             input_shell,
@@ -1439,8 +1640,22 @@ class KnowledgeChatApp:
             font=("Segoe UI", 10),
         )
         self.input.grid(row=0, column=0, sticky="ew")
-        self.web_search_button = WebSearchToggleButton(input_shell, self.toggle_web_search, image=self.web_search_image, size=42, background="#ffffff")
-        self.web_search_button.grid(row=0, column=1, sticky="ns")
+        self.image_attach_button = tk.Button(
+            input_shell,
+            text="IMG",
+            relief="flat",
+            bg="#ffffff",
+            activebackground="#e8f0fe",
+            fg="#384655",
+            activeforeground="#1a73e8",
+            command=self.attach_images,
+            cursor="hand2",
+            font=("Segoe UI Semibold", 8),
+        )
+        self.image_attach_button.grid(row=0, column=1, sticky="ne", padx=(6, 0), pady=8, ipadx=4, ipady=5)
+        self.add_tooltip(self.image_attach_button, "Прикрепить изображение в библиотеку.")
+        self.web_search_button = WebSearchToggleButton(input_shell, self.toggle_web_search, image=self.web_search_image, width=46, height=30, background="#ffffff")
+        self.web_search_button.grid(row=0, column=2, sticky="ne", padx=(6, 8), pady=8)
         self.add_tooltip(self.web_search_button, "Включить/выключить web-поиск для LLM.")
         self.input.bind("<Control-Return>", self.on_ctrl_return)
         self.input.bind("<Shift-Return>", self.on_shift_return)
@@ -1467,6 +1682,30 @@ class KnowledgeChatApp:
 
     def add_tooltip(self, widget: tk.Widget, text: str) -> None:
         self.tooltips.append(ToolTip(widget, text))
+
+    def bind_history_mousewheel(self, widget: tk.Widget) -> None:
+        widget.bind("<MouseWheel>", self.on_history_mousewheel, add="+")
+        widget.bind("<Button-4>", self.on_history_mousewheel, add="+")
+        widget.bind("<Button-5>", self.on_history_mousewheel, add="+")
+
+    def on_history_mousewheel(self, event: tk.Event) -> str:
+        if not hasattr(self, "chat_rows_canvas"):
+            return "break"
+        bbox = self.chat_rows_canvas.bbox("all")
+        if not bbox:
+            return "break"
+        content_height = max(0, int(bbox[3]) - int(bbox[1]))
+        if content_height <= self.chat_rows_canvas.winfo_height():
+            return "break"
+        if getattr(event, "num", None) == 4:
+            units = -3
+        elif getattr(event, "num", None) == 5:
+            units = 3
+        else:
+            delta = int(getattr(event, "delta", 0) or 0)
+            units = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
+        self.chat_rows_canvas.yview_scroll(units, "units")
+        return "break"
 
     def load_icon_image(self, path: Path, target_px: int) -> tk.PhotoImage | None:
         if not path.exists():
@@ -1576,7 +1815,7 @@ class KnowledgeChatApp:
     def choose_obsidian_path(self) -> None:
         path = filedialog.askopenfilename(
             title="Выберите Obsidian.exe",
-            filetypes=[("Obsidian", "Obsidian.exe"), ("Programs", "*.exe"), ("All files", "*.*")],
+            filetypes=[("Obsidian", "Obsidian.exe *.lnk"), ("Programs", "*.exe"), ("Shortcuts", "*.lnk"), ("All files", "*.*")],
             parent=self.settings_window or self.root,
         )
         if path:
@@ -2198,6 +2437,64 @@ class KnowledgeChatApp:
         path.write_text(render_capture_markdown(text, context_name, scope, project, topic, kind), encoding="utf-8-sig")
         return path.relative_to(VAULT_DIR).as_posix()
 
+    def save_image_capture(self, image_path: Path, caption: str, route: tuple[str, str, str]) -> str:
+        if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+            raise ValueError(f"Unsupported image format: {image_path.suffix}")
+        context_name, scope, project = route
+        hint = f"{caption} {image_path.stem}".strip()
+        topic = infer_topic(hint, scope)
+        if scope == "general" and not caption.strip() and topic == "General":
+            topic = ""
+        kind = "image_capture"
+        destination = capture_destination(scope, topic, kind)
+        destination.mkdir(parents=True, exist_ok=True)
+        title_seed = caption.strip() or image_path.stem
+        if topic:
+            title_seed = f"{topic} - {title_seed}"
+        path = unique_path(destination / f"{clean_filename(title_seed)}.md")
+        path.write_text(render_image_capture_markdown(image_path, caption, context_name, scope, project, topic), encoding="utf-8-sig")
+        return path.relative_to(VAULT_DIR).as_posix()
+
+    def attach_images(self) -> None:
+        if self.busy:
+            return
+        files = filedialog.askopenfilenames(
+            title="Выберите изображения",
+            filetypes=IMAGE_FILETYPES,
+            parent=self.root,
+        )
+        if not files:
+            return
+        caption = self.input_text()
+        saved: list[str] = []
+        errors: list[str] = []
+        user_lines = ["Изображения:"]
+        for file_name in files:
+            image_path = Path(file_name)
+            if not image_path.exists():
+                errors.append(f"{image_path.name}: файл не найден")
+                continue
+            route = self.selected_route(f"{caption} {image_path.name}".strip())
+            try:
+                rel_path = self.save_image_capture(image_path, caption, route)
+                saved.append(rel_path)
+                user_lines.append(f"- {image_path.name}")
+            except Exception as exc:
+                errors.append(f"{image_path.name}: {exc}")
+        if caption:
+            user_lines.extend(["", caption])
+        if saved:
+            self.append_user_message("\n".join(user_lines))
+            self.clear_input()
+            self.append_assistant_message(
+                "Сохранил image-intake в Obsidian:\n"
+                + "\n".join(f"- {path}" for path in saved)
+                + "\n\nИзвлечение данных помечено как pending: для полноценного OCR/vision нужен следующий importer-шаг.",
+                lightrag_used=False,
+            )
+        if errors:
+            self.append_warning_message("Не удалось сохранить часть изображений:\n" + "\n".join(errors), persist=False)
+
     def capture_path_from_rel(self, rel_path: str) -> Path:
         return VAULT_DIR / rel_path.replace("/", os.sep)
 
@@ -2642,6 +2939,8 @@ class KnowledgeChatApp:
         self.clear_button.configure(state=state)
         if hasattr(self, "web_search_button"):
             self.web_search_button.configure(state=state)
+        if hasattr(self, "image_attach_button"):
+            self.image_attach_button.configure(state=state)
         if not busy:
             self.cancel_busy_timer()
             self.set_active_process(None)
@@ -2676,10 +2975,14 @@ class KnowledgeChatApp:
     def find_obsidian_path(self) -> str:
         configured = str(self.settings.get("obsidian_path", "") or "").strip()
         local_app = Path(os.getenv("LOCALAPPDATA", ""))
+        roaming_app = Path(os.getenv("APPDATA", ""))
+        program_data = Path(os.getenv("PROGRAMDATA", ""))
         program_files = Path(os.getenv("PROGRAMFILES", ""))
         program_files_x86 = Path(os.getenv("PROGRAMFILES(X86)", ""))
         candidates = [
             configured,
+            shutil.which("Obsidian.exe") or "",
+            shutil.which("obsidian") or "",
             str(local_app / "Obsidian" / "Obsidian.exe"),
             str(local_app / "Programs" / "Obsidian" / "Obsidian.exe"),
             str(local_app / "Programs" / "obsidian" / "Obsidian.exe"),
@@ -2687,15 +2990,106 @@ class KnowledgeChatApp:
             str(program_files / "Obsidian" / "Obsidian.exe"),
             str(program_files_x86 / "Obsidian" / "Obsidian.exe"),
         ]
+        candidates.extend(self.find_obsidian_shortcuts(roaming_app, program_data))
+        candidates.extend(self.find_obsidian_registry_candidates())
         for candidate in candidates:
             if candidate and Path(candidate).exists():
                 return candidate
         return ""
 
+    def find_obsidian_shortcuts(self, roaming_app: Path, program_data: Path) -> list[str]:
+        roots = [
+            roaming_app / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+            program_data / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+            Path.home() / "Desktop",
+            Path(os.getenv("PUBLIC", "")) / "Desktop",
+        ]
+        shortcuts: list[str] = []
+        for root in roots:
+            if not root.exists():
+                continue
+            try:
+                shortcuts.extend(str(path) for path in root.rglob("*Obsidian*.lnk"))
+            except OSError:
+                continue
+        return shortcuts
+
+    def find_obsidian_registry_candidates(self) -> list[str]:
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            r"""
+$paths = @(
+  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+  'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+  'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+)
+foreach ($path in $paths) {
+  Get-ItemProperty $path -ErrorAction SilentlyContinue |
+    Where-Object { $_.DisplayName -like '*Obsidian*' } |
+    ForEach-Object {
+      if ($_.InstallLocation) { Join-Path $_.InstallLocation 'Obsidian.exe' }
+      if ($_.DisplayIcon) { $_.DisplayIcon }
+    }
+}
+""",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(ROOT),
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=4,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except Exception:
+            return []
+        candidates: list[str] = []
+        for line in (completed.stdout or "").splitlines():
+            candidate = self.clean_windows_program_path(line)
+            if candidate:
+                candidates.append(candidate)
+        return candidates
+
+    def clean_windows_program_path(self, value: str) -> str:
+        value = str(value or "").strip().strip('"')
+        if not value:
+            return ""
+        value = re.sub(r",\d+$", "", value).strip().strip('"')
+        lowered = value.lower()
+        for suffix in (".exe", ".lnk"):
+            index = lowered.find(suffix)
+            if index >= 0:
+                return value[: index + len(suffix)].strip().strip('"')
+        return value if Path(value).suffix.lower() in {".exe", ".lnk"} else ""
+
+    def launch_windows_program(self, path: str) -> None:
+        target = Path(path)
+        if target.suffix.lower() == ".lnk":
+            startfile = getattr(os, "startfile", None)
+            if startfile:
+                startfile(str(target))
+                return
+        try:
+            subprocess.Popen([str(target)], cwd=str(self.vault_dir() if self.vault_dir().exists() else ROOT))
+        except OSError:
+            startfile = getattr(os, "startfile", None)
+            if startfile:
+                startfile(str(target))
+            else:
+                raise
+
     def open_obsidian(self) -> None:
         obsidian = self.find_obsidian_path()
         if obsidian:
-            subprocess.Popen([obsidian], cwd=str(self.vault_dir() if self.vault_dir().exists() else ROOT))
+            self.launch_windows_program(obsidian)
             return
         answer = messagebox.askyesnocancel(
             "Obsidian не найден",
@@ -2705,14 +3099,14 @@ class KnowledgeChatApp:
         if answer is True:
             path = filedialog.askopenfilename(
                 title="Выберите Obsidian.exe",
-                filetypes=[("Obsidian", "Obsidian.exe"), ("Programs", "*.exe"), ("All files", "*.*")],
+                filetypes=[("Obsidian", "Obsidian.exe *.lnk"), ("Programs", "*.exe"), ("Shortcuts", "*.lnk"), ("All files", "*.*")],
                 parent=self.root,
             )
             if path:
                 self.settings["obsidian_path"] = path
                 self.save_settings()
                 self.obsidian_path_var.set(path)
-                subprocess.Popen([path], cwd=str(self.vault_dir() if self.vault_dir().exists() else ROOT))
+                self.launch_windows_program(path)
         elif answer is False:
             webbrowser.open("https://obsidian.md/")
 

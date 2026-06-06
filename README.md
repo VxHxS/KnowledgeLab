@@ -6,12 +6,13 @@ KnowledgeLab is a local-first Windows knowledge system that combines LM Studio, 
 
 - Runs a normal local LLM chat through LM Studio by default.
 - Lets the user enable LightRAG retrieval when they want answers from the local knowledge base.
-- Treats the chat as an entry point into a personal library/archive: web links, YouTube links, text notes, Telegram exports, PDFs, DOCX files, and other sources should become lightweight Markdown materials.
+- Treats the chat as an entry point into a personal library/archive: web links, YouTube links, images, text notes, Telegram exports, PDFs, DOCX files, and other sources should become lightweight Markdown materials.
 - Falls back to plain LLM answers when LightRAG is off or unavailable, with a small gray note in the chat.
 - Stores knowledge as Markdown in an Obsidian vault.
 - Saves links and notes from the chat into Obsidian when the user says things like `вот ссылка`, `сохрани`, or `добавь в базу`.
 - Parses saved web pages into Markdown when possible.
 - Sends saved YouTube links through transcript sync and starts LightRAG refresh in the background.
+- Saves attached images as lightweight Markdown intake notes with source path, topic guess, and pending OCR/vision extraction status.
 - Provides a web-search toggle near the input. When enabled, the chat fetches web-search snippets and gives them to the LLM as temporary context.
 - Keeps LightRAG local-only. LightRAG can use web data only after a page, video, or source is saved into the vault and indexed.
 - Keeps chat sessions locally with a grouped left-side history panel, rename, and delete.
@@ -97,8 +98,9 @@ KnowledgeLab should keep permanent storage lightweight:
 
 - Web pages are saved as Markdown notes and parsed text when possible.
 - YouTube links are stored as link notes, then converted into transcript Markdown through `sync-youtube-links.py`.
+- Images are stored as Markdown intake notes first. OCR, screenshot parsing, UI understanding, and vision-model extraction are planned as importer modules that fill the `Extracted Data` section.
 - Heavy source files should be temporary inputs. After processing, keep extracted text, transcript, metadata, and references, not the original large file.
-- PDF, DOCX, social networks, arbitrary video links, audio transcription, and transcript cleanup are planned as importer modules around the same Markdown-first pipeline.
+- PDF, DOCX, social networks, arbitrary video links, audio transcription, image OCR/vision, and transcript cleanup are planned as importer modules around the same Markdown-first pipeline.
 
 ## Optimization Notes
 
