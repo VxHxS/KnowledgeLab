@@ -63,6 +63,7 @@ DEFAULT_SETTINGS = {
     "lmstudio_base_url": LMSTUDIO_API_URL,
     "llm_model": DEFAULT_LLM_MODEL,
     "embedding_model": DEFAULT_EMBEDDING_MODEL,
+    "response_language": "ru",
     "default_llm_mode_applied": True,
     "main_toolbar_lightrag_removed": True,
     "plain_chat_adapter_version": 1,
@@ -112,6 +113,11 @@ KNOWLEDGE_HELP_TERMS = {
 LIGHTRAG_STATUS_TERMS = {
     "подключен", "подключён", "подключена", "работает", "включен", "включён",
     "активен", "готов", "используется", "статус", "доступен", "доступна",
+}
+
+RUSSIAN_LANGUAGE_TERMS = {
+    "на русском", "по русски", "по-русски", "русский", "русском", "отвечай на русском",
+    "говори на русском", "пиши на русском",
 }
 
 TOPICS = [
@@ -700,6 +706,11 @@ def is_lightrag_status_text(text: str) -> bool:
     return any(term in compact for term in LIGHTRAG_STATUS_TERMS) or compact.rstrip("?").strip() in {"lightrag", "light rag", "лайтраг"}
 
 
+def is_russian_language_request(text: str) -> bool:
+    compact = compact_text(text)
+    return any(term in compact for term in RUSSIAN_LANGUAGE_TERMS)
+
+
 def is_save_intent_text(text: str) -> bool:
     compact = compact_text(text)
     if any(phrase in compact for phrase in SAVE_PHRASES):
@@ -740,6 +751,8 @@ def run_static_self_test() -> int:
         failures.append("LightRAG status question was routed as retrieval")
     if not is_lightrag_status_text("lightrag подключен?"):
         failures.append("LightRAG status intent was not recognized")
+    if not is_russian_language_request("на русском пж"):
+        failures.append("Russian language preference was not recognized")
     if failures:
         print("\n".join(failures))
         return 1
@@ -847,6 +860,7 @@ class KnowledgeChatApp:
         settings["lmstudio_base_url"] = str(settings.get("lmstudio_base_url", LMSTUDIO_API_URL) or LMSTUDIO_API_URL).rstrip("/")
         settings["llm_model"] = str(settings.get("llm_model", DEFAULT_LLM_MODEL) or DEFAULT_LLM_MODEL)
         settings["embedding_model"] = str(settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL) or DEFAULT_EMBEDDING_MODEL)
+        settings["response_language"] = str(settings.get("response_language", "ru") or "ru")
         settings["default_llm_mode_applied"] = True
         settings["main_toolbar_lightrag_removed"] = True
         settings["plain_chat_adapter_version"] = 1
@@ -865,6 +879,7 @@ class KnowledgeChatApp:
         self.settings["lmstudio_base_url"] = str(self.settings.get("lmstudio_base_url", LMSTUDIO_API_URL) or LMSTUDIO_API_URL).rstrip("/")
         self.settings["llm_model"] = str(self.settings.get("llm_model", DEFAULT_LLM_MODEL) or DEFAULT_LLM_MODEL)
         self.settings["embedding_model"] = str(self.settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL) or DEFAULT_EMBEDDING_MODEL)
+        self.settings["response_language"] = str(self.settings.get("response_language", "ru") or "ru")
         self.settings["default_llm_mode_applied"] = True
         self.settings["main_toolbar_lightrag_removed"] = True
         self.settings["plain_chat_adapter_version"] = 1
@@ -1599,7 +1614,9 @@ class KnowledgeChatApp:
                     "role": "system",
                     "content": (
                         "You are KnowledgeLab Chat, a helpful general-purpose assistant. "
-                        "Answer normally and directly in the user's language. "
+                        "Answer normally and directly in Russian by default. "
+                        "Use another language only when the user clearly writes in that language or explicitly asks for it. "
+                        "Short ambiguous messages like 'ку', 'ого', '555', or mistyped Russian words must be treated as Russian conversation. "
                         "Do not treat every message as a knowledge-base lookup. "
                         "Do not show reasoning or analysis; provide only the final useful answer."
                     ),
@@ -1624,7 +1641,7 @@ class KnowledgeChatApp:
                     "content": (
                         "/no_think\n\n"
                         "Ответь финальным сообщением без рассуждений. "
-                        "Если вопрос короткий или бытовой, ответь естественно и кратко.\n\n"
+                        "Если вопрос короткий или бытовой, ответь естественно и кратко на русском.\n\n"
                         f"{question}"
                     ),
                 },
@@ -1925,6 +1942,9 @@ class KnowledgeChatApp:
     def is_lightrag_status_intent(self, text: str) -> bool:
         return is_lightrag_status_text(text)
 
+    def is_language_preference_intent(self, text: str) -> bool:
+        return is_russian_language_request(text)
+
     def wants_knowledge_lookup(self, text: str) -> bool:
         return is_knowledge_lookup_text(text)
 
@@ -2144,6 +2164,12 @@ class KnowledgeChatApp:
         self.append_user_message(question)
         self.remember_input(question)
         self.clear_input()
+
+        if self.is_language_preference_intent(question):
+            self.settings["response_language"] = "ru"
+            self.save_settings()
+            self.append_assistant_message("Да, буду отвечать по-русски.", lightrag_used=False)
+            return
 
         if self.is_lightrag_status_intent(question):
             self.append_assistant_message(self.lightrag_status_message(question), lightrag_used=False)
@@ -2687,7 +2713,7 @@ def run_behavior_self_test() -> int:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "Answer normally in the user's language. Do not show reasoning. Return only the final answer.",
+                        "content": "Answer normally in Russian by default. Do not show reasoning. Return only the final answer.",
                     },
                     {"role": "user", "content": f"/no_think\n\n{question}"},
                 ],
@@ -2703,7 +2729,7 @@ def run_behavior_self_test() -> int:
                 return content.strip(), ""
             if isinstance(reasoning, str) and reasoning.strip():
                 payload["max_tokens"] = 2400
-                payload["messages"][-1]["content"] = f"/no_think\n\nОтветь финальным сообщением без рассуждений.\n\n{question}"
+                payload["messages"][-1]["content"] = f"/no_think\n\nОтветь финальным сообщением без рассуждений на русском.\n\n{question}"
                 retry = request_json("chat/completions", method="POST", payload=payload, timeout=120.0)
                 retry_message = ((retry.get("choices") or [{}])[0].get("message") or {})
                 retry_content = retry_message.get("content")

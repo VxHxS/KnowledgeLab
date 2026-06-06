@@ -493,6 +493,7 @@ function Ensure-ChatSettings {
         lmstudio_base_url = "http://127.0.0.1:1234/v1"
         llm_model = "qwen/qwen3-14b"
         embedding_model = "text-embedding-nomic-embed-text-v1.5"
+        response_language = "ru"
         default_llm_mode_applied = $true
         main_toolbar_lightrag_removed = $true
         plain_chat_adapter_version = 1
@@ -511,6 +512,7 @@ function Ensure-ChatSettings {
             $settings["lmstudio_base_url"] = "http://127.0.0.1:1234/v1"
             $settings["llm_model"] = "qwen/qwen3-14b"
             $settings["embedding_model"] = "text-embedding-nomic-embed-text-v1.5"
+            $settings["response_language"] = "ru"
             $settings["auto_process_links"] = $true
             if (-not $settings.Contains("web_search_enabled")) {
                 $settings["web_search_enabled"] = $false
