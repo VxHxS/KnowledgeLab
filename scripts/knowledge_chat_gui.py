@@ -9,6 +9,8 @@ import sys
 import threading
 import time
 import tkinter as tk
+import urllib.parse
+import urllib.request
 import webbrowser
 from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
@@ -23,6 +25,8 @@ CONTROL_SCRIPT = ROOT / "LightRAG-Control.ps1"
 LEGACY_HISTORY_PATH = ROOT / "tmp" / "knowledge-chat-history.jsonl"
 CHAT_STORE_PATH = ROOT / "tmp" / "knowledge-chat-sessions.json"
 SETTINGS_PATH = ROOT / "tmp" / "knowledge-chat-settings.json"
+OBSIDIAN_ICON = ROOT / "assets" / "icons" / "Obsidian.png"
+LMSTUDIO_API_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 
 CONTEXTS = {
     "General": ("general", ""),
@@ -50,6 +54,7 @@ DEFAULT_SETTINGS = {
     "game_guard_delay_seconds": 5,
     "obsidian_path": "",
     "default_llm_mode_applied": True,
+    "main_toolbar_lightrag_removed": True,
 }
 
 WEB_TERMS = {
@@ -496,6 +501,7 @@ class KnowledgeChatApp:
         self.root.configure(bg="#f4f6f8")
 
         self.settings = self.load_settings()
+        self.save_settings()
         self.context_var = tk.StringVar(value="Auto")
         self.lightrag_var = tk.BooleanVar(value=bool(self.settings["use_lightrag"]))
         self.status_var = tk.StringVar(value="Ready")
@@ -507,6 +513,8 @@ class KnowledgeChatApp:
         self.settings_window: tk.Toplevel | None = None
         self.settings_status_var = tk.StringVar(value="")
         self.tooltips: list[ToolTip] = []
+        self.obsidian_raw_image: tk.PhotoImage | None = None
+        self.obsidian_image: tk.PhotoImage | None = None
         self.chat_widgets: list[tk.Widget] = []
         self.input_history: list[str] = []
         self.input_history_index = 0
@@ -523,6 +531,7 @@ class KnowledgeChatApp:
         self.active_chat_id = str(self.chat_store.get("active_chat_id") or "")
         if not self.active_chat_id or not self.get_active_chat():
             self.create_chat(save=False)
+        self.save_chat_store()
 
         self.configure_styles()
         self.build_ui()
@@ -531,6 +540,7 @@ class KnowledgeChatApp:
         self.load_input_history()
         self.apply_settings_to_ui()
         self.schedule_game_guard_probe()
+        self.schedule_health_probe()
 
     def configure_styles(self) -> None:
         style = ttk.Style()
@@ -555,6 +565,9 @@ class KnowledgeChatApp:
                     if "default_llm_mode_applied" not in loaded:
                         settings["use_lightrag"] = False
                         settings["default_llm_mode_applied"] = True
+                    if "main_toolbar_lightrag_removed" not in loaded:
+                        settings["use_lightrag"] = False
+                        settings["main_toolbar_lightrag_removed"] = True
         except (OSError, json.JSONDecodeError):
             pass
         settings["send_on_enter"] = bool(settings.get("send_on_enter", DEFAULT_SETTINGS["send_on_enter"]))
@@ -564,6 +577,7 @@ class KnowledgeChatApp:
         settings["button_color"] = valid_hex_color(str(settings.get("button_color", "")), DEFAULT_SETTINGS["button_color"])
         settings["obsidian_path"] = str(settings.get("obsidian_path", "") or "")
         settings["default_llm_mode_applied"] = True
+        settings["main_toolbar_lightrag_removed"] = True
         return settings
 
     def save_settings(self) -> None:
@@ -574,6 +588,7 @@ class KnowledgeChatApp:
         self.settings["button_color"] = valid_hex_color(str(self.settings["button_color"]), DEFAULT_SETTINGS["button_color"])
         self.settings["obsidian_path"] = str(self.settings.get("obsidian_path", "") or "")
         self.settings["default_llm_mode_applied"] = True
+        self.settings["main_toolbar_lightrag_removed"] = True
         try:
             SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
             SETTINGS_PATH.write_text(json.dumps(self.settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -764,7 +779,7 @@ class KnowledgeChatApp:
 
         toolbar = ttk.Frame(self.root, padding=(14, 10), style="Top.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.columnconfigure(7, weight=1)
+        toolbar.columnconfigure(6, weight=1)
 
         ttk.Label(toolbar, text="LightRAG Chat", style="Header.TLabel").grid(row=0, column=0, padx=(0, 18))
         ttk.Label(toolbar, text="Контекст", style="Context.TLabel").grid(row=0, column=1, padx=(0, 6))
@@ -778,29 +793,25 @@ class KnowledgeChatApp:
         self.context.grid(row=0, column=2, padx=(0, 10))
         self.add_tooltip(self.context, "Auto выбирает проект по сообщению. Можно вручную выбрать General, Web Development или My Game.")
 
-        self.lightrag_toggle = ttk.Checkbutton(
-            toolbar,
-            text="LightRAG",
-            variable=self.lightrag_var,
-            command=self.on_lightrag_toggle,
-            style="Toolbar.TCheckbutton",
-        )
-        self.lightrag_toggle.grid(row=0, column=3, padx=(0, 12))
-        self.add_tooltip(self.lightrag_toggle, "Включает поиск по базе знаний. Если индекс не готов, чат сам вернется к обычной LLM.")
-
-        self.obsidian_button = ttk.Button(toolbar, text="◇", width=3, command=self.open_obsidian)
-        self.obsidian_button.grid(row=0, column=4, padx=(0, 8))
+        if OBSIDIAN_ICON.exists():
+            self.obsidian_raw_image = tk.PhotoImage(file=str(OBSIDIAN_ICON))
+            factor = max(1, self.obsidian_raw_image.width() // 22)
+            self.obsidian_image = self.obsidian_raw_image.subsample(factor, factor)
+            self.obsidian_button = ttk.Button(toolbar, image=self.obsidian_image, width=3, command=self.open_obsidian)
+        else:
+            self.obsidian_button = ttk.Button(toolbar, text="Ob", width=3, command=self.open_obsidian)
+        self.obsidian_button.grid(row=0, column=3, padx=(0, 8))
         self.add_tooltip(self.obsidian_button, "Открыть приложение Obsidian. Если путь не найден, можно указать Obsidian.exe.")
 
         self.settings_button = ttk.Button(toolbar, text="Настройки", command=self.open_settings)
-        self.settings_button.grid(row=0, column=5, padx=(0, 14))
+        self.settings_button.grid(row=0, column=4, padx=(0, 14))
         self.add_tooltip(self.settings_button, "Enter, LightRAG, цвет кнопок, Obsidian и Game Guard.")
 
         self.control_button = ttk.Button(toolbar, text="Control", command=self.open_light_rag_control)
-        self.control_button.grid(row=0, column=6, padx=(0, 14))
+        self.control_button.grid(row=0, column=5, padx=(0, 14))
         self.add_tooltip(self.control_button, "Открыть LightRAG-Control для проверки LM Studio, моделей, индексов и импорта.")
 
-        ttk.Label(toolbar, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=8, sticky="e")
+        ttk.Label(toolbar, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=7, sticky="e")
 
         main = ttk.Frame(self.root, padding=(12, 12, 12, 14), style="App.TFrame")
         main.grid(row=1, column=0, sticky="nsew")
@@ -1041,6 +1052,64 @@ class KnowledgeChatApp:
             self.schedule_game_guard_probe()
         self.close_settings()
 
+    def schedule_health_probe(self) -> None:
+        self.root.after(900, self.start_health_probe)
+
+    def start_health_probe(self) -> None:
+        threading.Thread(target=self.health_worker, daemon=True).start()
+
+    def health_worker(self) -> None:
+        warnings = self.diagnose_system()
+        if warnings:
+            self.root.after(0, self.finish_health_probe, warnings)
+
+    def finish_health_probe(self, warnings: list[str]) -> None:
+        chat = self.get_active_chat()
+        has_messages = bool(chat and chat.get("messages"))
+        for warning in warnings:
+            self.append_warning_message(warning, persist=False)
+        if not has_messages:
+            self.status_var.set("Needs attention")
+
+    def diagnose_system(self) -> list[str]:
+        warnings: list[str] = []
+        if not (ROOT / "LightRAG" / ".venv" / "Scripts" / "python.exe").exists():
+            warnings.append("Python environment не найден. Запустите installer или откройте LightRAG-Control для проверки установки.")
+
+        lms = self.lmstudio_cli_path()
+        if not lms:
+            warnings.append("LM Studio CLI не найден. Установите LM Studio, затем откройте LightRAG-Control.")
+        elif not self.is_lmstudio_api_online():
+            warnings.append("LM Studio server сейчас не отвечает. При первом сообщении чат попробует запустить его автоматически; если не получится, откройте LightRAG-Control.")
+
+        if not self.find_obsidian_path():
+            warnings.append("Obsidian не найден автоматически. Нажмите фиолетовую иконку Obsidian, чтобы выбрать Obsidian.exe или открыть официальный сайт.")
+
+        context_name, scope, project = self.selected_route("")
+        if bool(self.settings.get("use_lightrag", False)) and not self.is_lightrag_ready(scope, project):
+            self.settings["use_lightrag"] = False
+            self.save_settings()
+            warnings.append(f"LightRAG был включен, но индекс для {context_name} не найден. Я отключил LightRAG, чтобы обычный чат продолжал работать.")
+        return warnings
+
+    def lmstudio_cli_path(self) -> str:
+        candidates = [
+            Path.home() / ".lmstudio" / "bin" / "lms.exe",
+            Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "LM Studio" / "resources" / "app" / ".webpack" / "lms.exe",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return str(candidate)
+        return ""
+
+    def is_lmstudio_api_online(self) -> bool:
+        try:
+            request = urllib.request.Request(f"{LMSTUDIO_API_URL}/models", headers={"Accept": "application/json"})
+            with urllib.request.urlopen(request, timeout=1.2) as response:
+                return 200 <= int(response.status) < 500
+        except Exception:
+            return False
+
     def render_current_chat(self) -> None:
         self.chat.configure(state="normal")
         self.chat.delete("1.0", "end")
@@ -1198,6 +1267,13 @@ class KnowledgeChatApp:
         cleaned = self.trim_output(output)
         if "NativeCommandError" in cleaned or "lms.exe : Success! Server is now running" in cleaned:
             return "LM Studio ответил служебным сообщением вместо обычного результата. Попробуйте еще раз или откройте LightRAG-Control для проверки системы."
+        if "LightRAG storage was not found" in cleaned:
+            self.lightrag_var.set(False)
+            self.settings["use_lightrag"] = False
+            self.save_settings()
+            return "LightRAG индекс не найден, поэтому я отключил LightRAG. Обычный чат продолжит работать через LM Studio; для индексации откройте LightRAG-Control."
+        if "Context size has been exceeded" in cleaned or "context size has been exceeded" in cleaned:
+            return "Контекст запроса оказался слишком большим для текущей модели. Я уже ограничиваю историю; повторите запрос короче или начните новый чат."
         if "LM Studio CLI was not found" in cleaned:
             return "LM Studio CLI не найден. Установите LM Studio или откройте LightRAG-Control для диагностики."
         if "Connection" in cleaned or "connect" in cleaned.lower():
@@ -1223,7 +1299,7 @@ class KnowledgeChatApp:
         if save:
             self.settings["use_lightrag"] = bool(self.lightrag_var.get())
             self.save_settings()
-        self.status_var.set("LightRAG on" if self.lightrag_var.get() else "LightRAG off")
+            self.status_var.set("LightRAG on" if self.lightrag_var.get() else "LightRAG off")
 
     def selected_route(self, text: str) -> tuple[str, str, str]:
         return route_context(text, self.context_var.get())
@@ -1348,6 +1424,14 @@ class KnowledgeChatApp:
 
         use_lightrag = bool(self.lightrag_var.get())
         warnings: list[str] = []
+        if not self.lmstudio_cli_path():
+            self.append_assistant_message(
+                "LM Studio CLI не найден. Чат не сможет получить ответ, пока LM Studio не установлен. Откройте LightRAG-Control для диагностики или установите LM Studio.",
+                "error",
+            )
+            return
+        if not self.is_lmstudio_api_online():
+            warnings.append("LM Studio server сейчас не отвечает; пробую запустить его автоматически.")
         if use_lightrag and not self.is_lightrag_ready(scope, project):
             use_lightrag = False
             self.lightrag_var.set(False)
@@ -1358,7 +1442,7 @@ class KnowledgeChatApp:
         operation_id = self.begin_operation(f"Asking {context_name}...", self.query_timeout_seconds)
         thread = threading.Thread(
             target=self.run_query,
-            args=(operation_id, prompt, context_name, scope, project, use_lightrag, warnings),
+            args=(operation_id, question, prompt, context_name, scope, project, use_lightrag, warnings),
             daemon=True,
         )
         thread.start()
@@ -1366,21 +1450,45 @@ class KnowledgeChatApp:
     def build_prompt_with_history(self, question: str) -> str:
         chat = self.get_active_chat()
         messages = chat.get("messages", []) if chat else []
-        prior = [m for m in messages if m.get("role") in {"user", "assistant"}][-8:]
+        prior = [
+            m for m in messages
+            if m.get("role") in {"user", "assistant"} and self.is_safe_history_message(str(m.get("text", "")))
+        ][-4:]
         if not prior:
             return question
         lines = ["Краткий контекст текущего диалога:"]
+        total_chars = 0
         for message in prior:
             role = "User" if message.get("role") == "user" else "Assistant"
-            text = str(message.get("text", "")).strip()
+            text = re.sub(r"\s+", " ", str(message.get("text", "")).strip())[:360]
             if text:
-                lines.append(f"{role}: {text[:900]}")
+                line = f"{role}: {text}"
+                total_chars += len(line)
+                if total_chars > 1600:
+                    break
+                lines.append(line)
         lines.extend(["", f"Текущее сообщение пользователя: {question}"])
         return "\n".join(lines)
+
+    def is_safe_history_message(self, text: str) -> bool:
+        lowered = text.lower()
+        noisy_markers = (
+            "nativecommanderror",
+            "context size has been exceeded",
+            "openai api call failed",
+            "starting lm studio server",
+            "knowledge lab is ready",
+            "lightrag storage was not found",
+            "fullyqualifiederrorid",
+            "categoryinfo",
+            "success! server is now running",
+        )
+        return bool(text.strip()) and not any(marker in lowered for marker in noisy_markers)
 
     def run_query(
         self,
         operation_id: int,
+        raw_question: str,
         question: str,
         context_name: str,
         scope: str,
@@ -1388,7 +1496,7 @@ class KnowledgeChatApp:
         use_lightrag: bool,
         pending_warnings: list[str],
     ) -> None:
-        command = [
+        command_base = [
             "powershell",
             "-NoProfile",
             "-ExecutionPolicy",
@@ -1399,8 +1507,7 @@ class KnowledgeChatApp:
             scope,
         ]
         if project:
-            command.extend(["-Project", project])
-        command.append(question)
+            command_base.extend(["-Project", project])
 
         env = dict(os.environ)
         env["LMSTUDIO_GUI_OUTPUT"] = "1"
@@ -1410,7 +1517,12 @@ class KnowledgeChatApp:
             env.setdefault("LMSTUDIO_LIGHTRAG_OFF_REASON", "LightRAG отключен: ответ без базы знаний.")
 
         try:
+            command = command_base + [question]
             returncode, output = self.run_command(command, self.query_timeout_seconds, env=env)
+            if returncode != 0 and "context size has been exceeded" in output.lower() and question != raw_question:
+                retry_warning = "История чата была слишком длинной, поэтому я повторил запрос без старого контекста."
+                returncode, output = self.run_command(command_base + [raw_question], self.query_timeout_seconds, env=env)
+                pending_warnings = pending_warnings + [retry_warning]
             output, warnings = self.split_knowledge_warnings(output)
             warnings = pending_warnings + warnings
             if returncode != 0:
@@ -1561,10 +1673,17 @@ class KnowledgeChatApp:
 
     def find_obsidian_path(self) -> str:
         configured = str(self.settings.get("obsidian_path", "") or "").strip()
+        local_app = Path(os.getenv("LOCALAPPDATA", ""))
+        program_files = Path(os.getenv("PROGRAMFILES", ""))
+        program_files_x86 = Path(os.getenv("PROGRAMFILES(X86)", ""))
         candidates = [
             configured,
-            str(Path(os.getenv("LOCALAPPDATA", "")) / "Obsidian" / "Obsidian.exe"),
-            str(Path(os.getenv("LOCALAPPDATA", "")) / "Programs" / "Obsidian" / "Obsidian.exe"),
+            str(local_app / "Obsidian" / "Obsidian.exe"),
+            str(local_app / "Programs" / "Obsidian" / "Obsidian.exe"),
+            str(local_app / "Programs" / "obsidian" / "Obsidian.exe"),
+            str(local_app / "Microsoft" / "WindowsApps" / "Obsidian.exe"),
+            str(program_files / "Obsidian" / "Obsidian.exe"),
+            str(program_files_x86 / "Obsidian" / "Obsidian.exe"),
         ]
         for candidate in candidates:
             if candidate and Path(candidate).exists():
@@ -1576,9 +1695,14 @@ class KnowledgeChatApp:
         if obsidian:
             subprocess.Popen([obsidian], cwd=str(VAULT_DIR if VAULT_DIR.exists() else ROOT))
             return
+        vault_uri = "obsidian://open?path=" + urllib.parse.quote(str(VAULT_DIR))
+        try:
+            webbrowser.open(vault_uri)
+        except Exception:
+            pass
         answer = messagebox.askyesnocancel(
             "Obsidian не найден",
-            "Не удалось найти Obsidian.exe.\n\nДа - указать путь к Obsidian.exe\nНет - открыть сайт Obsidian\nОтмена - ничего не делать",
+            "Я попробовал открыть Obsidian через системный протокол, но Obsidian.exe не найден в стандартных местах.\n\nДа - указать путь к Obsidian.exe\nНет - открыть официальный сайт Obsidian\nОтмена - ничего не делать",
             parent=self.root,
         )
         if answer is True:

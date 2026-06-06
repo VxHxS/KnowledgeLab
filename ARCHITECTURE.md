@@ -115,7 +115,7 @@ sequenceDiagram
 | Chat UI | Messenger-style Tkinter app with left chat history, rename/delete, settings, Obsidian icon, cancel and timeout protection |
 | Conversation Store | Local JSON sessions with messages, warnings, timestamps, and current chat |
 | Intent Router | Treats all input as normal chat first, then activates save/RAG/diagnostic capabilities when appropriate |
-| LightRAG Adapter | Uses indexed storage only when the checkbox is enabled and storage exists |
+| LightRAG Adapter | Uses indexed storage only when LightRAG is enabled in Settings and storage exists |
 | Obsidian Capture | Saves URLs and notes from phrases like `вот ссылка`, `сохрани`, `добавь в базу` |
 | Health Hints | Converts system failures into readable guidance and suggests LightRAG-Control |
 | GPU Game Guard | Samples GPU load after chat opens; warns about heavy processes and KnowledgeLab-side processes |
@@ -132,8 +132,8 @@ sequenceDiagram
 
 ## Behavior Rules
 
-- Default chat mode is plain LM Studio. LightRAG is off until enabled in settings or by the checkbox.
-- If LightRAG is enabled but the selected index is missing, the checkbox turns off, the answer uses plain LM Studio, and the user sees a gray note.
+- Default chat mode is plain LM Studio. LightRAG is off until enabled in Settings.
+- If LightRAG is enabled but the selected index is missing, LightRAG turns off, the answer uses plain LM Studio, and the user sees a gray note.
 - `Enter` sends by default; `Shift+Enter` adds a newline. This is configurable.
 - Big maintenance buttons stay out of the chat. Reindexing and deeper checks belong in LightRAG-Control.
 - Obsidian opens through the small icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.

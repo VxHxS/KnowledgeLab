@@ -62,7 +62,7 @@ Default behavior:
 - LightRAG is off by default.
 - Plain LM Studio answers are still valid answers.
 - A gray italic note says when the answer did not use LightRAG.
-- If the LightRAG checkbox is enabled but the index is missing, the checkbox turns off and the answer continues through plain LM Studio.
+- If LightRAG is enabled in Settings but the index is missing, LightRAG turns off and the answer continues through plain LM Studio.
 - The left column stores local chat sessions.
 - The Obsidian icon opens the Obsidian app; if it is not found, the user can choose `Obsidian.exe` or open the Obsidian website.
 - Maintenance actions such as reindexing are handled in `LightRAG-Control`, not as large buttons in the chat.
