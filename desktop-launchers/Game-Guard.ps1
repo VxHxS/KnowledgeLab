@@ -35,7 +35,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "KnowledgeLab Game Guard" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "Game Guard watches for Crimson Desert and stops LM Studio models before they steal RAM/VRAM."
+Write-Host "Game Guard helps diagnose GPU conflicts between heavy apps and local AI processes."
+Write-Host "The chat also runs a delayed GPU warning after the window opens."
 Write-Host ""
 Write-Host "1 - Watch now in this window"
 Write-Host "2 - Install to Windows startup and start hidden"

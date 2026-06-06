@@ -51,13 +51,7 @@ function Get-GuardProcessNames {
         }
     }
     else {
-        foreach ($name in @(
-            "CrimsonDesert",
-            "CrimsonDesertClient",
-            "CrimsonDesertLauncher",
-            "CrimsonDesert-Win64-Shipping",
-            "*Crimson*Desert*"
-        )) {
+        foreach ($name in @()) {
             $names.Add($name) | Out-Null
         }
     }
@@ -245,7 +239,8 @@ function Invoke-GameGuardOnce {
 
     $matches = @(Get-GuardedGameProcesses)
     if ($matches.Count -eq 0) {
-        Write-Host "Game Guard: no watched game process is running."
+        Write-Host "Game Guard: no configured watched process is running."
+        Write-Host "The chat uses GPU-load warnings after it opens. Name-based blocking is only used when -ProcessName or KNOWLEDGELAB_GAME_GUARD_PROCESSES is configured."
         return 0
     }
 
@@ -273,8 +268,13 @@ function Watch-GameGuard {
     try {
         Set-GameGuardPid
         $watched = (Get-GuardProcessNames) -join ", "
-        Write-Host "KnowledgeLab Game Guard is watching: $watched"
-        Write-Host "If one of these games starts, LM Studio models are unloaded automatically."
+        if (-not $watched) {
+            Write-Host "KnowledgeLab Game Guard has no configured process names."
+            Write-Host "The chat uses GPU-load warnings after it opens. Set KNOWLEDGELAB_GAME_GUARD_PROCESSES or pass -ProcessName to enable legacy name-based blocking."
+        } else {
+            Write-Host "KnowledgeLab Game Guard is watching: $watched"
+            Write-Host "If one of these configured processes starts, LM Studio models are unloaded automatically."
+        }
         Write-Host "Close this window to stop this visible watcher."
         Write-GuardLog "watch started: $watched"
 
@@ -336,6 +336,7 @@ if ($Watch) {
 Write-Host "KnowledgeLab Game Guard"
 Write-Host ""
 Write-Host "Watched processes: $((Get-GuardProcessNames) -join ', ')"
+Write-Host "Default mode: no name-based process blocking. The chat uses delayed GPU-load warnings."
 Write-Host ""
 Write-Host "Usage:"
 Write-Host "  scripts\game-guard.ps1 -Once"

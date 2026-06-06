@@ -2,19 +2,17 @@
 
 State date: 2026-06-06.
 
-KnowledgeLab is a local-first Windows knowledge system built from an Obsidian Markdown vault, LightRAG retrieval, and LM Studio local models.
+KnowledgeLab is a local-first Windows knowledge system. The chat is an ordinary LM Studio chat by default, with optional LightRAG retrieval, Obsidian capture, diagnostics, and GPU conflict warnings as capabilities around the conversation.
 
 ## Goals
 
-- Keep knowledge in plain Markdown.
-- Index selected vault scopes with LightRAG.
-- Retrieve relevant chunks before the LLM answer.
-- Show a visible gray warning when an answer was generated without knowledge-base context.
-- Keep chat usable when an index is missing by auto-indexing in the background and answering through fallback mode for that turn.
-- Protect the UI from stuck states with cancellation and timeouts.
-- Protect games from local AI model memory pressure with a background Game Guard.
-- Keep the Desktop clean with only two launchers.
-- Keep runtime files, indexes, history, and secrets local.
+- Keep normal chat unrestricted: greetings, short messages, code requests, translation, brainstorming, and questions all go to the LLM.
+- Keep LightRAG optional and visible: when it is off or unavailable, the answer still completes and the UI shows a small gray note.
+- Keep knowledge in plain Markdown inside an Obsidian vault.
+- Keep chat history, settings, indexes, logs, and secrets local.
+- Make failures understandable and point the user to LightRAG-Control when the system needs maintenance.
+- Warn about likely GPU conflicts without auto-closing games or auto-starting Game Guard at Windows startup.
+- Keep the Desktop clean with only `LightRAG-Chat.lnk` and `LightRAG-Control.lnk`.
 
 ## Main Paths
 
@@ -25,24 +23,14 @@ C:\MyFiles\KnowledgeLab
 Obsidian vault:
 C:\MyFiles\KnowledgeLab\Obsidian-Test-Vault
 
-LightRAG virtual environment:
-C:\MyFiles\KnowledgeLab\LightRAG\.venv
-
 Desktop launchers:
 %USERPROFILE%\Desktop\LightRag\LightRAG-Chat.lnk
 %USERPROFILE%\Desktop\LightRag\LightRAG-Control.lnk
 
-Desktop launcher logic:
-C:\MyFiles\KnowledgeLab\LightRAG-Desktop
+Chat sessions:
+C:\MyFiles\KnowledgeLab\tmp\knowledge-chat-sessions.json
 
-Shortcut icons:
-C:\MyFiles\KnowledgeLab\assets\icons\LightRAG-Chat.ico
-C:\MyFiles\KnowledgeLab\assets\icons\LightRAG-Control.ico
-
-Local chat history:
-C:\MyFiles\KnowledgeLab\tmp\knowledge-chat-history.jsonl
-
-Local chat settings:
+Chat settings:
 C:\MyFiles\KnowledgeLab\tmp\knowledge-chat-settings.json
 
 LM Studio API:
@@ -54,112 +42,85 @@ http://127.0.0.1:1234/v1
 ```mermaid
 flowchart TD
     User["User"]
-    Desktop["Desktop shortcuts<br/>LightRAG-Chat.lnk<br/>LightRAG-Control.lnk"]
-    DesktopLogic["LightRAG-Desktop<br/>launcher and control scripts"]
-    ChatGUI["scripts/knowledge_chat_gui.py<br/>Knowledge Chat GUI"]
-    Toggle["LightRAG toggle<br/>on by default"]
-    Settings["tmp/knowledge-chat-settings.json<br/>Enter, LightRAG, button color, Game Guard"]
-    Cancel["Cancel + timeout guard<br/>unlock stuck UI states"]
-    History["tmp/knowledge-chat-history.jsonl<br/>local chat history"]
-    ScopeRouter["Scope router<br/>Auto / general / web / game"]
-    QueryPS["scripts/query-vault-scope-lmstudio.ps1"]
-    AutoIndex["Background auto-index<br/>tmp/auto-index-*.pid"]
-    QueryPY["scripts/query-vault-lmstudio.py"]
-    Audit["scripts/lightrag_query_audit.py<br/>retrieval audit and fallback warning"]
-    LightRAG["LightRAG storage<br/>rag_storage_general<br/>rag_storage_web<br/>rag_storage_game_my-game"]
-    Vault["Obsidian-Test-Vault<br/>Markdown notes and sources"]
-    GameGuard["scripts/game-guard.ps1<br/>Crimson Desert watcher"]
-    LMStudio["LM Studio OpenAI-compatible API"]
-    Embed["Embedding model<br/>nomic-embed"]
-    LLM["LLM<br/>qwen/qwen3-14b"]
-    Answer["Answer in chat<br/>references or gray warning"]
+    Chat["LightRAG Chat<br/>scripts/knowledge_chat_gui.py"]
+    Store["Conversation Store<br/>tmp/knowledge-chat-sessions.json"]
+    Settings["Settings<br/>Enter, LightRAG, colors, Obsidian, Game Guard"]
+    Router["Intent Router<br/>plain chat / RAG / save / diagnostics"]
+    Save["Obsidian Capture<br/>Markdown notes"]
+    Health["Health Hints<br/>LM Studio, LightRAG index, Obsidian path"]
+    Guard["GPU Game Guard<br/>delayed warning after chat opens"]
+    QueryPS["Scoped PowerShell Query<br/>query-vault-scope-lmstudio.ps1"]
+    QueryPY["LLM/RAG Adapter<br/>query-vault-lmstudio.py"]
+    LightRAG["LightRAG Storage<br/>rag_storage_general/web/game"]
+    Vault["Obsidian Vault<br/>Markdown source of truth"]
+    LMStudio["LM Studio<br/>OpenAI-compatible API"]
+    Control["LightRAG-Control<br/>checks and maintenance"]
+    Answer["Answer<br/>LLM text + gray capability notes"]
 
-    User --> Desktop
-    Desktop --> DesktopLogic
-    DesktopLogic --> ChatGUI
-    ChatGUI --> Toggle
-    ChatGUI --> Settings
-    ChatGUI --> Cancel
-    ChatGUI --> History
-    ChatGUI --> ScopeRouter
-    Settings --> GameGuard
-    ScopeRouter --> QueryPS
-    QueryPS --> AutoIndex
+    User --> Chat
+    Chat --> Store
+    Chat --> Settings
+    Chat --> Router
+    Router --> Save
+    Save --> Vault
+    Router --> QueryPS
     QueryPS --> QueryPY
-    QueryPY --> Audit
-    Toggle --> QueryPY
-    AutoIndex --> Vault
-    AutoIndex --> LightRAG
-    GameGuard --> LMStudio
+    QueryPY --> LMStudio
     QueryPY --> LightRAG
     LightRAG --> Vault
-    QueryPY --> LMStudio
-    LMStudio --> Embed
-    LMStudio --> LLM
-    Audit --> Answer
-    LLM --> Answer
+    QueryPY --> Answer
+    LMStudio --> Answer
+    Chat --> Guard
+    Chat --> Health
+    Health --> Control
+    Guard --> Control
 ```
 
-## Query Flow
+## Chat Flow
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant GUI as Knowledge Chat
-    participant PS as Scoped PowerShell query
-    participant Q as query-vault-lmstudio.py
-    participant R as LightRAG
-    participant E as nomic-embed
-    participant L as qwen/qwen3-14b
+    participant GUI as LightRAG Chat
+    participant R as Intent Router
+    participant Q as Query Layer
+    participant L as LM Studio
+    participant G as LightRAG
+    participant O as Obsidian
 
-    U->>GUI: Ask a question
-    GUI->>GUI: Pick scope with Auto/general/web/game
-    GUI->>GUI: Read saved settings and LightRAG checkbox
-    GUI->>PS: Run scoped query
-    alt LightRAG is on and storage is missing
-        PS->>PS: Start background ingest for this scope
-        PS->>Q: Disable LightRAG for current turn only
-        Q->>L: Direct LM Studio request
-        L-->>Q: Plain answer
-        Q-->>GUI: Gray warning and answer
-    else LightRAG is on and storage is ready
-        PS->>Q: Use indexed storage
-        Q->>R: aquery_llm in RAG mode
-        R->>E: Embed question
-        E-->>R: Vector
-        R-->>Q: Chunks, references, graph context
-        alt Context exists
-            Q->>L: Ask with LightRAG context
-            L-->>Q: Answer with references
-            Q-->>GUI: Answer
-        else Context missing
-            Q->>L: Bypass answer without vault context
-            L-->>Q: Plain answer
-            Q-->>GUI: ::knowledge-warning and answer
-        end
-    else LightRAG is off
-        PS->>Q: Skip storage requirement
-        Q->>L: Direct LM Studio request
-        L-->>Q: Plain answer
-        Q-->>GUI: ::knowledge-warning and answer
+    U->>GUI: Any message
+    GUI->>GUI: Save to current chat session
+    GUI->>R: Classify capability intent
+    alt Save/link intent
+        R->>GUI: Ask project if unclear
+        GUI->>O: Write Markdown note
+        GUI-->>U: Saved path
+    else LightRAG enabled and index ready
+        R->>Q: Ask with selected scope
+        Q->>G: Retrieve context
+        Q->>L: Ask with context
+        L-->>GUI: Answer with references/context
+    else LightRAG off or unavailable
+        R->>Q: Ask plain LM Studio
+        Q->>L: Direct LLM request
+        L-->>GUI: Normal answer
+        GUI-->>U: Gray note that LightRAG was not used
     end
-    GUI->>GUI: Save turn to local history
 ```
 
 ## Components
 
-| Component | Role | Important files |
-| --- | --- | --- |
-| Obsidian vault | Source of truth for Markdown knowledge | `Obsidian-Test-Vault` |
-| Source import | Places links, Telegram exports, articles, and notes into the vault | `scripts/*telegram*`, `scripts/*youtube*`, `scripts/vault_sources.py` |
-| LightRAG ingest | Builds vector and graph storage for a selected scope | `scripts/ingest-vault-lmstudio.py`, `scripts/ingest-vault-scope-lmstudio.ps1` |
-| LightRAG query | Retrieves chunks and calls the local LLM | `scripts/query-vault-lmstudio.py`, `scripts/query-vault-scope-lmstudio.ps1` |
-| Query audit | Reads structured retrieval results and formats warnings | `scripts/lightrag_query_audit.py` |
-| Knowledge Chat | Desktop GUI for questions, captures, history, settings, cancellation, and fallback warnings | `scripts/knowledge_chat_gui.py` |
-| Chat settings | Persisted preferences for Enter-to-send, LightRAG, button color, and Game Guard | `tmp/knowledge-chat-settings.json` |
-| Game Guard | Watches selected game processes and unloads local AI models before they compete for RAM/VRAM | `scripts/game-guard.ps1` |
-| Desktop Control | Maintenance launcher for checks, manual indexing, vault opening, model stop, and Game Guard | `LightRAG-Desktop/LightRAG-Control` |
-| Installer | Sets up dependencies and writes the two Desktop launchers | `scripts/install-knowledge-lab.ps1`, `scripts/install_wizard_gui.py` |
+| Component | Role |
+| --- | --- |
+| Chat UI | Messenger-style Tkinter app with left chat history, rename/delete, settings, Obsidian icon, cancel and timeout protection |
+| Conversation Store | Local JSON sessions with messages, warnings, timestamps, and current chat |
+| Intent Router | Treats all input as normal chat first, then activates save/RAG/diagnostic capabilities when appropriate |
+| LightRAG Adapter | Uses indexed storage only when the checkbox is enabled and storage exists |
+| Obsidian Capture | Saves URLs and notes from phrases like `вот ссылка`, `сохрани`, `добавь в базу` |
+| Health Hints | Converts system failures into readable guidance and suggests LightRAG-Control |
+| GPU Game Guard | Samples GPU load after chat opens; warns about heavy processes and KnowledgeLab-side processes |
+| LightRAG-Control | Manual checks, maintenance indexing, model stop, imports, and deeper troubleshooting |
+| Installer | Checks dependencies, writes only two Desktop launchers, assigns icons, and produces `INSTALL_REPORT.md` |
 
 ## Knowledge Scopes
 
@@ -169,85 +130,30 @@ sequenceDiagram
 | `web` | `web-development` | `LightRAG/rag_storage_web` | Web-development notes, snippets, frontend/backend solutions and sources |
 | `game` | `my-game` | `LightRAG/rag_storage_game_my-game` | Personal game-project knowledge |
 
-Example frontmatter:
+## Behavior Rules
 
-```yaml
-scope: game
-project: my-game
-```
-
-## Ingest Flow
-
-```mermaid
-flowchart LR
-    Sources["YouTube / Telegram / Articles / Notes"]
-    Vault["Obsidian Markdown vault"]
-    Filter["vault_sources.py<br/>scope and project filters"]
-    Ingest["ingest-vault-lmstudio.py"]
-    Embed["LM Studio embeddings<br/>nomic-embed"]
-    Storage["LightRAG storage<br/>chunks / graph / kv stores"]
-
-    Sources --> Vault
-    Vault --> Filter
-    Filter --> Ingest
-    Ingest --> Embed
-    Embed --> Storage
-```
-
-Regular chat usage starts missing indexing automatically. These commands are manual maintenance tools:
-
-```powershell
-scripts\ingest-vault-scope-lmstudio.ps1 -Scope general
-scripts\ingest-vault-scope-lmstudio.ps1 -Scope web -Project web-development
-scripts\ingest-vault-scope-lmstudio.ps1 -Scope game -Project my-game
-```
-
-## Answer Behavior
-
-The normal path is retrieval-first:
-
-1. The GUI selects a scope.
-2. The GUI reads saved settings for Enter-to-send, LightRAG, button color, and Game Guard.
-3. The PowerShell wrapper points `LMSTUDIO_RAG_DIR` at that scope storage.
-4. If storage is missing, the wrapper starts background indexing and forces plain LM Studio mode for that one answer.
-5. If storage is ready, `query-vault-lmstudio.py` calls `LightRAG.aquery_llm(...)`.
-6. LightRAG embeds the question, retrieves chunks, and prepares context.
-7. The LLM answers with retrieved context.
-8. The query layer checks chunks, references, entities, and relationships.
-9. If the context is missing, the answer still completes through bypass mode and the GUI shows a gray warning.
-
-When the `LightRAG` checkbox is off, the GUI sets:
-
-```powershell
-$env:LMSTUDIO_USE_LIGHTRAG='0'
-```
-
-That mode skips LightRAG storage checks and sends the question directly to LM Studio. The GUI still shows a gray warning so the user can see that the knowledge base was not used.
-
-Chat requests run with a timeout and a visible `Cancel` button. If a child process hangs, the GUI terminates it and unlocks the buttons.
-
-Game Guard state is stored in `tmp/knowledge-chat-settings.json`. When it is enabled, the chat installs a Windows Startup watcher and starts it in the background. When it is disabled, the watcher is stopped and removed from Startup.
+- Default chat mode is plain LM Studio. LightRAG is off until enabled in settings or by the checkbox.
+- If LightRAG is enabled but the selected index is missing, the checkbox turns off, the answer uses plain LM Studio, and the user sees a gray note.
+- `Enter` sends by default; `Shift+Enter` adds a newline. This is configurable.
+- Big maintenance buttons stay out of the chat. Reindexing and deeper checks belong in LightRAG-Control.
+- Obsidian opens through the small icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.
+- Game Guard does not run at Windows startup by default. It samples GPU load a few seconds after the chat opens and warns only on sustained load.
+- Startup blocking by the old process-name Game Guard is opt-in through `KNOWLEDGELAB_STARTUP_GAME_GUARD=1`.
 
 ## Diagnostics
 
-`LMSTUDIO_SHOW_RETRIEVAL` does not enable LightRAG. It only prints an audit report. LightRAG is enabled by default unless `LMSTUDIO_USE_LIGHTRAG=0` is set.
+Manual retrieval audit:
 
 ```powershell
 $env:LMSTUDIO_SHOW_RETRIEVAL='1'
 scripts\query-vault-scope-lmstudio.ps1 -Scope game -Project my-game "What is known about my-game? Give references."
 ```
 
-Healthy audit:
+Plain LLM mode:
 
-```text
-LightRAG retrieval audit:
-- status: success
-- mode: naive
-- chunks found: 1
-- final chunks sent to answer: 1
-- references: 1
-- source files:
-  [1] 20 Projects/My Game/_README.md
+```powershell
+$env:LMSTUDIO_USE_LIGHTRAG='0'
+scripts\query-vault-scope-lmstudio.ps1 -Scope web -Project web-development "Make CSS for a popup window."
 ```
 
 Control smoke test:
@@ -256,42 +162,13 @@ Control smoke test:
 powershell -NoProfile -ExecutionPolicy Bypass -File "C:\MyFiles\KnowledgeLab\LightRAG-Desktop\LightRAG-Control\LightRAG-Control.ps1" -SmokeTest
 ```
 
-Expected:
-
-```text
-ScriptCount=9
-CmdCount=9
-```
-
-## Installer Layout
-
-The stable installer writes only these shortcuts to the Desktop:
-
-```text
-LightRAG-Chat.lnk
-LightRAG-Control.lnk
-```
-
-Everything else stays under:
-
-```text
-C:\MyFiles\KnowledgeLab\LightRAG-Desktop
-```
-
-Shortcut icons live under:
-
-```text
-C:\MyFiles\KnowledgeLab\assets\icons
-```
-
-The installer also writes `INSTALL_REPORT.md` and shows a final manual-steps section for tools that still need to be installed by hand.
-
 ## Local-Only Artifacts
 
 These are intentionally not committed:
 
 - `LightRAG/.venv`
 - `LightRAG/rag_storage*`
+- `tmp/knowledge-chat-sessions.json`
 - `tmp/knowledge-chat-history.jsonl`
 - `tmp/knowledge-chat-settings.json`
 - `.env`

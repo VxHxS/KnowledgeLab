@@ -101,7 +101,7 @@ if (-not (Test-Path -LiteralPath $Lms)) {
     throw "LM Studio CLI was not found at $Lms"
 }
 
-if (Test-Path -LiteralPath $GameGuard) {
+if (($env:KNOWLEDGELAB_STARTUP_GAME_GUARD -match "^(1|true|yes|on)$") -and (Test-Path -LiteralPath $GameGuard)) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $GameGuard -Once
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Knowledge Lab AI startup was blocked by Game Guard." -ForegroundColor Yellow

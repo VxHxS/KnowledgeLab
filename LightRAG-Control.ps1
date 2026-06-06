@@ -66,7 +66,7 @@ function Get-ScriptDescription {
             return "Строит отдельный LightRAG-индекс для выбранного scope: all, general или game."
         }
         "^09 Game Guard\.cmd$|^Game-Guard\.ps1$" {
-            return "Следит за Crimson Desert и автоматически выгружает LM Studio/Qwen, чтобы освободить RAM/VRAM для игры."
+            return "Проверяет конфликт тяжелой GPU-нагрузки и локальных AI-процессов. В чате предупреждение появляется после открытия окна, без автозапуска при включении ПК."
         }
 default {
             return "Запускает файл $($Script.Name) из папки LightRag."

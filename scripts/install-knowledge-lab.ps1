@@ -511,12 +511,20 @@ function Write-InstallReport {
     $lines.Add("## Manual steps") | Out-Null
     $lines.Add("") | Out-Null
     if ($ManualSteps.Count -eq 0) {
-        $lines.Add("- None.") | Out-Null
+        $lines.Add("- None detected as missing by the installer.") | Out-Null
     } else {
         foreach ($step in $ManualSteps) {
             $lines.Add("- $step") | Out-Null
         }
     }
+    $lines.Add("") | Out-Null
+    $lines.Add("## After install") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("- LightRAG-Chat starts as a normal LM Studio chat. LightRAG retrieval is optional and can be enabled from the chat checkbox or Settings.") | Out-Null
+    $lines.Add("- If LightRAG is enabled but an index is missing, the chat keeps answering through plain LM Studio and suggests LightRAG-Control for maintenance.") | Out-Null
+    $lines.Add("- Install LM Studio manually if it is missing, then download/load the configured LLM and embedding models.") | Out-Null
+    $lines.Add("- Install Obsidian manually if you want the Obsidian icon to open the app directly. If it is not detected, the chat can ask for Obsidian.exe.") | Out-Null
+    $lines.Add("- Use LightRAG-Control when LM Studio, models, indexes, imports, or GPU/Game Guard diagnostics need attention.") | Out-Null
     $lines.Add("") | Out-Null
     $lines.Add("## Main launchers") | Out-Null
     $lines.Add("") | Out-Null

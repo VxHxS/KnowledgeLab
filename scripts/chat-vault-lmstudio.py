@@ -48,7 +48,7 @@ SHOW_RETRIEVAL = env_flag("LMSTUDIO_SHOW_RETRIEVAL", False)
 USE_LIGHTRAG = env_flag("LMSTUDIO_USE_LIGHTRAG", True)
 LIGHTRAG_OFF_REASON = os.getenv(
     "LMSTUDIO_LIGHTRAG_OFF_REASON",
-    "LightRAG выключен вручную; ответ создан без поиска по базе знаний.",
+    "LightRAG отключен: ответ без базы знаний.",
 )
 ENABLE_LLM_CACHE = env_flag("LMSTUDIO_ENABLE_LLM_CACHE", False)
 EMBEDDING_CLIENT = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
@@ -107,7 +107,12 @@ async def plain_lmstudio_answer(question: str) -> str:
         messages=[
             {
                 "role": "system",
-                "content": "Answer directly. LightRAG retrieval is disabled for this request.",
+                "content": (
+                    "You are a helpful general-purpose assistant inside KnowledgeLab Chat. "
+                    "Answer the user's message normally and directly. "
+                    "Do not assume every message is a knowledge-base lookup request. "
+                    "If the user asks for code, writing, translation, brainstorming, or casual conversation, help with that task."
+                ),
             },
             {"role": "user", "content": f"{question}\n\n/no_think"},
         ],
