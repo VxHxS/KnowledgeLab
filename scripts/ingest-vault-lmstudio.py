@@ -24,7 +24,7 @@ if not WORKING_DIR.is_absolute():
 BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
 API_KEY = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
 LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
-EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "nomic-embed")
+EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 EMBEDDING_DIM = int(os.getenv("LMSTUDIO_EMBEDDING_DIM", "768"))
 CHUNK_TOKEN_SIZE = int(os.getenv("LMSTUDIO_CHUNK_TOKEN_SIZE", "800"))
 CHUNK_OVERLAP_TOKEN_SIZE = int(os.getenv("LMSTUDIO_CHUNK_OVERLAP_TOKEN_SIZE", "100"))

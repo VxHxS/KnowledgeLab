@@ -15,7 +15,7 @@ $EmbeddingModelKey = $env:LMSTUDIO_EMBEDDING_MODEL_KEY
 if (-not $EmbeddingModelKey) { $EmbeddingModelKey = "text-embedding-nomic-embed-text-v1.5" }
 
 $EmbeddingIdentifier = $env:LMSTUDIO_EMBEDDING_MODEL
-if (-not $EmbeddingIdentifier) { $EmbeddingIdentifier = "nomic-embed" }
+if (-not $EmbeddingIdentifier) { $EmbeddingIdentifier = "text-embedding-nomic-embed-text-v1.5" }
 
 $LlmTtlSeconds = $env:LMSTUDIO_LLM_TTL_SECONDS
 if (-not $LlmTtlSeconds) { $LlmTtlSeconds = "900" }

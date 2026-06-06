@@ -33,7 +33,7 @@ if not WORKING_DIR.is_absolute():
 BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
 API_KEY = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
 LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
-EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "nomic-embed")
+EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 EMBEDDING_DIM = int(os.getenv("LMSTUDIO_EMBEDDING_DIM", "768"))
 LLM_CONTEXT_TOKENS = env_int("LMSTUDIO_CONTEXT_TOKENS", 8192)
 LLM_MAX_RESPONSE_TOKENS = env_int("LMSTUDIO_MAX_RESPONSE_TOKENS", 2048)

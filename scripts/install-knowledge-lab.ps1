@@ -356,7 +356,7 @@ function Ensure-EnvFile {
     $example = Join-Path $Root "LightRAG\.env.lmstudio.example"
     if (Test-Path -LiteralPath $envFile) {
         $content = Get-Content -LiteralPath $envFile -Raw -ErrorAction SilentlyContinue
-        if ($content -match "LLM_BINDING=openai" -and $content -match "LLM_MODEL=qwen/qwen3-14b" -and $content -match "EMBEDDING_MODEL=nomic-embed") {
+        if ($content -match "LLM_BINDING=openai" -and $content -match "LLM_MODEL=qwen/qwen3-14b" -and $content -match "EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5") {
             Add-Check "LightRAG .env" "OK" $envFile
             return
         }
@@ -486,11 +486,13 @@ function Ensure-ChatSettings {
         button_color = "#3d5f88"
         game_guard_enabled = $true
         game_guard_delay_seconds = 5
+        auto_process_links = $true
+        web_search_enabled = $false
         obsidian_path = ""
         vault_path = $vaultPath
         lmstudio_base_url = "http://127.0.0.1:1234/v1"
         llm_model = "qwen/qwen3-14b"
-        embedding_model = "nomic-embed"
+        embedding_model = "text-embedding-nomic-embed-text-v1.5"
         default_llm_mode_applied = $true
         main_toolbar_lightrag_removed = $true
         plain_chat_adapter_version = 1
@@ -508,7 +510,11 @@ function Ensure-ChatSettings {
             $settings["vault_path"] = $vaultPath
             $settings["lmstudio_base_url"] = "http://127.0.0.1:1234/v1"
             $settings["llm_model"] = "qwen/qwen3-14b"
-            $settings["embedding_model"] = "nomic-embed"
+            $settings["embedding_model"] = "text-embedding-nomic-embed-text-v1.5"
+            $settings["auto_process_links"] = $true
+            if (-not $settings.Contains("web_search_enabled")) {
+                $settings["web_search_enabled"] = $false
+            }
             $settings["main_toolbar_lightrag_removed"] = $true
             $settings["plain_chat_adapter_version"] = 1
         }

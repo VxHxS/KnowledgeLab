@@ -9,6 +9,7 @@ KnowledgeLab is a local-first Windows knowledge system. The chat is an ordinary 
 - Keep normal chat unrestricted: greetings, short messages, code requests, translation, brainstorming, and questions all go to the LLM.
 - Keep LightRAG optional and visible: when it is off or unavailable, the answer still completes and the UI shows a small gray note.
 - Keep knowledge in plain Markdown inside an Obsidian vault.
+- Keep permanent storage lightweight: source files are temporary inputs; extracted text, transcripts, metadata, and references are the durable artifacts.
 - Keep chat history, settings, indexes, logs, and secrets local.
 - Make failures understandable and point the user to LightRAG-Control when the system needs maintenance.
 - Warn about likely GPU conflicts without auto-closing games or auto-starting Game Guard at Windows startup.
@@ -45,8 +46,9 @@ flowchart TD
     Chat["LightRAG Chat<br/>scripts/knowledge_chat_gui.py"]
     Store["Conversation Store<br/>tmp/knowledge-chat-sessions.json"]
     Settings["Settings<br/>Enter, LightRAG, colors, Obsidian, vault, Game Guard"]
-    Router["Intent Router<br/>plain chat / RAG / save / diagnostics"]
+    Router["Intent Router<br/>plain chat / RAG / save / status / diagnostics"]
     Save["Obsidian Capture<br/>Markdown notes"]
+    Pipeline["Material Pipeline<br/>web parse / YouTube transcript / future PDF DOCX social"]
     Health["Health Hints<br/>LM Studio, LightRAG index, Obsidian path"]
     Guard["GPU Game Guard<br/>delayed warning after chat opens"]
     DirectLM["Direct LM Studio Adapter<br/>/v1/models + /v1/chat/completions"]
@@ -63,6 +65,8 @@ flowchart TD
     Chat --> Settings
     Chat --> Router
     Router --> Save
+    Save --> Pipeline
+    Pipeline --> Vault
     Save --> Vault
     Router --> DirectLM
     DirectLM --> LMStudio
@@ -99,6 +103,7 @@ sequenceDiagram
     alt Save/link intent
         R->>GUI: Ask project if unclear
         GUI->>O: Write Markdown note
+        GUI->>O: Parse page or sync YouTube transcript in background
         GUI-->>U: Saved path
     else LightRAG enabled and index ready
         R->>Q: Ask with selected scope
@@ -123,6 +128,7 @@ sequenceDiagram
 | Direct LM Studio Adapter | Checks `/v1/models`, validates loaded model IDs, and sends plain chat directly to `/v1/chat/completions` |
 | LightRAG Adapter | Uses indexed storage only when LightRAG is enabled in Settings and storage exists |
 | Obsidian Capture | Saves URLs and notes from phrases like `вот ссылка`, `сохрани`, `добавь в базу` |
+| Material Pipeline | Parses web pages into Markdown, syncs YouTube transcripts, and provides the future extension point for PDF, DOCX, social networks, arbitrary video, audio, and transcript cleanup |
 | Health Hints | Converts system failures into readable guidance and suggests LightRAG-Control |
 | GPU Game Guard | Samples GPU load after chat opens; warns about heavy processes and KnowledgeLab-side processes |
 | LightRAG-Control | Manual checks, maintenance indexing, model stop, imports, and deeper troubleshooting |
@@ -139,11 +145,15 @@ sequenceDiagram
 ## Behavior Rules
 
 - Default chat mode is plain LM Studio. LightRAG is off until enabled in Settings.
+- Explicit knowledge-base wording such as `найди в базе`, `из сохраненных материалов`, or `по материалам из Obsidian` is treated as a retrieval request.
+- LightRAG status wording such as `lightrag подключен?` is answered by the app status layer and must not trigger retrieval.
 - Plain chat does not call the PowerShell RAG wrapper; it uses the LM Studio OpenAI-compatible API directly.
 - If LightRAG is enabled but the selected index is missing, LightRAG turns off, the answer uses plain LM Studio, and the user sees a gray note.
 - `Enter` sends by default; `Shift+Enter` adds a newline. This is configurable.
 - Big maintenance buttons stay out of the chat. Reindexing and deeper checks belong in LightRAG-Control.
-- Obsidian opens through the small icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.
+- Web search is a small input-side toggle: when enabled, normal messages open a browser search for the current text without replacing normal chat.
+- LightRAG is local-only. It can use web content only after the page/video/source is saved, parsed/transcribed, and indexed into the local vault.
+- Obsidian opens through the right-edge icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.
 - Game Guard does not run at Windows startup by default. It samples GPU load a few seconds after the chat opens and warns only on sustained load.
 - The installer removes legacy Game Guard startup shortcuts left by older builds.
 - Startup blocking by the old process-name Game Guard is opt-in through `KNOWLEDGELAB_STARTUP_GAME_GUARD=1`.

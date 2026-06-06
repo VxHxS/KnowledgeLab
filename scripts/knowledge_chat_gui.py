@@ -10,6 +10,8 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+from html.parser import HTMLParser
+from urllib.parse import quote_plus
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -27,9 +29,10 @@ LEGACY_HISTORY_PATH = Path(os.getenv("KNOWLEDGELAB_LEGACY_HISTORY_PATH", str(ROO
 CHAT_STORE_PATH = Path(os.getenv("KNOWLEDGELAB_CHAT_STORE_PATH", str(ROOT / "tmp" / "knowledge-chat-sessions.json")))
 SETTINGS_PATH = Path(os.getenv("KNOWLEDGELAB_CHAT_SETTINGS_PATH", str(ROOT / "tmp" / "knowledge-chat-settings.json")))
 OBSIDIAN_ICON = ROOT / "assets" / "icons" / "Obsidian.png"
+WEB_ICON = ROOT / "assets" / "icons" / "web.svg"
 LMSTUDIO_API_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 DEFAULT_LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
-DEFAULT_EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "nomic-embed")
+DEFAULT_EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 
 CONTEXTS = {
     "General": ("general", ""),
@@ -63,6 +66,8 @@ DEFAULT_SETTINGS = {
     "default_llm_mode_applied": True,
     "main_toolbar_lightrag_removed": True,
     "plain_chat_adapter_version": 1,
+    "auto_process_links": True,
+    "web_search_enabled": False,
 }
 
 WEB_TERMS = {
@@ -70,7 +75,7 @@ WEB_TERMS = {
     "react", "next.js", "nextjs", "vue", "svelte", "vite", "tailwind", "dom",
     "browser", "layout", "responsive", "api", "fetch", "axios", "auth", "oauth",
     "jwt", "node", "npm", "верстка", "вёрстка", "фронтенд", "бекенд", "сайт",
-    "страница", "popup", "modal", "css",
+    "страница", "лендинг", "landing", "landing page", "popup", "modal", "css",
 }
 
 GAME_TERMS = {
@@ -89,6 +94,24 @@ QUESTION_HINTS = {
     "что", "как", "почему", "зачем", "когда", "где", "кто", "какой", "какая",
     "какие", "можешь", "можно", "сделай", "напиши", "объясни", "расскажи",
     "найди", "поищи", "проверь", "why", "how", "what", "write", "make",
+}
+
+KNOWLEDGE_LOOKUP_TERMS = {
+    "найди в базе", "поищи в базе", "ищи в базе", "из базы знаний", "по базе знаний",
+    "из сохраненного", "из сохранённого", "из сохраненных", "из сохранённых",
+    "из сохраненных материалов", "из сохранённых материалов", "по сохраненным материалам",
+    "по сохранённым материалам", "что у меня сохранено", "что сохранено",
+    "сделай из сохраненных", "сделай из сохранённых", "по материалам из obsidian",
+}
+
+KNOWLEDGE_HELP_TERMS = {
+    "как узнать", "как достать", "как получить", "как спросить", "как найти",
+    "как пользоваться", "как использовать", "доступ к lightrag", "доступ к базе",
+}
+
+LIGHTRAG_STATUS_TERMS = {
+    "подключен", "подключён", "подключена", "работает", "включен", "включён",
+    "активен", "готов", "используется", "статус", "доступен", "доступна",
 }
 
 TOPICS = [
@@ -306,6 +329,65 @@ class IconButton(tk.Canvas):
         self.create_image(self.size // 2, self.size // 2, image=self.image)
 
 
+class WebSearchToggleButton(tk.Canvas):
+    def __init__(self, parent: tk.Widget, command, *, size: int = 42, background: str = "#ffffff") -> None:
+        super().__init__(
+            parent,
+            width=size,
+            height=size,
+            background=background,
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+            takefocus=True,
+        )
+        self.command = command
+        self.size = size
+        self.active = False
+        self.hover = False
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+        self.bind("<ButtonRelease-1>", self.on_click)
+        self.bind("<space>", self.on_keyboard)
+        self.bind("<Return>", self.on_keyboard)
+        self.redraw()
+
+    def set_active(self, value: bool) -> None:
+        self.active = bool(value)
+        self.redraw()
+
+    def on_enter(self, _event: tk.Event | None = None) -> None:
+        self.hover = True
+        self.redraw()
+
+    def on_leave(self, _event: tk.Event | None = None) -> None:
+        self.hover = False
+        self.redraw()
+
+    def on_click(self, _event: tk.Event | None = None) -> None:
+        if self.command:
+            self.command()
+
+    def on_keyboard(self, _event: tk.Event | None = None) -> str:
+        self.on_click()
+        return "break"
+
+    def redraw(self) -> None:
+        self.delete("all")
+        size = self.size
+        bg = "#e8f0fe" if self.active else "#ffffff"
+        outline = "#1a73e8" if self.active else ("#8ea2b5" if self.hover else "#cfd4da")
+        icon = "#1a73e8" if self.active else "#384655"
+        self.create_rectangle(0, 0, size, size, fill=bg, outline="")
+        self.create_oval(7, 7, size - 7, size - 7, outline=outline, width=2)
+        self.create_arc(10, 7, size - 10, size - 7, start=90, extent=180, outline=icon, width=1)
+        self.create_arc(10, 7, size - 10, size - 7, start=270, extent=180, outline=icon, width=1)
+        self.create_line(7, size // 2, size - 7, size // 2, fill=icon, width=1)
+        self.create_line(size // 2, 8, size // 2, size - 8, fill=icon, width=1)
+        if self.active:
+            self.create_oval(size - 12, 8, size - 6, 14, fill="#34a853", outline="")
+
+
 def now_iso() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
 
@@ -507,6 +589,117 @@ def render_capture_markdown(text: str, context_name: str, scope: str, project: s
     return "\n".join(frontmatter + body)
 
 
+class ArticleTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title = ""
+        self.parts: list[str] = []
+        self.current_tag = ""
+        self.skip_depth = 0
+        self.title_active = False
+        self.title_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag = tag.lower()
+        if tag in {"script", "style", "noscript", "svg", "canvas", "form", "nav", "footer", "header"}:
+            self.skip_depth += 1
+            return
+        if tag == "title":
+            self.title_active = True
+        if tag in {"p", "li", "h1", "h2", "h3", "pre", "code", "blockquote"}:
+            self.current_tag = tag
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self.skip_depth:
+            if tag in {"script", "style", "noscript", "svg", "canvas", "form", "nav", "footer", "header"}:
+                self.skip_depth -= 1
+            return
+        if tag == "title":
+            self.title_active = False
+            self.title = compact_whitespace(" ".join(self.title_parts))[:180]
+        if tag in {"p", "li", "h1", "h2", "h3", "pre", "blockquote"}:
+            self.parts.append("\n")
+            self.current_tag = ""
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth:
+            return
+        text = compact_whitespace(data)
+        if not text:
+            return
+        if self.title_active:
+            self.title_parts.append(text)
+            return
+        if self.current_tag:
+            if self.current_tag == "li":
+                text = f"- {text}"
+            if self.current_tag in {"h1", "h2", "h3"}:
+                text = f"## {text}"
+            self.parts.append(text)
+
+    def markdown(self) -> str:
+        lines: list[str] = []
+        previous_blank = True
+        for part in self.parts:
+            text = part.strip()
+            if not text:
+                if not previous_blank:
+                    lines.append("")
+                previous_blank = True
+                continue
+            lines.append(text)
+            previous_blank = False
+        return "\n".join(lines).strip()
+
+
+def compact_whitespace(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def fetch_article_markdown(url: str, *, timeout: int = 15, limit_bytes: int = 2_500_000) -> tuple[str, str]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "KnowledgeLab/1.0 (+local Obsidian capture)",
+            "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        content_type = response.headers.get("Content-Type", "")
+        raw = response.read(limit_bytes)
+    charset_match = re.search(r"charset=([\w.-]+)", content_type, re.IGNORECASE)
+    charset = charset_match.group(1) if charset_match else "utf-8"
+    html = raw.decode(charset, errors="replace")
+    extractor = ArticleTextExtractor()
+    extractor.feed(html)
+    markdown = extractor.markdown()
+    title = extractor.title or title_from_text(url, "Web article")
+    return title, markdown[:60000]
+
+
+def is_knowledge_lookup_text(text: str) -> bool:
+    compact = compact_text(text)
+    return any(term in compact for term in KNOWLEDGE_LOOKUP_TERMS)
+
+
+def is_lightrag_help_text(text: str) -> bool:
+    compact = compact_text(text)
+    if "lightrag" not in compact and "light rag" not in compact and "баз" not in compact:
+        return False
+    return any(term in compact for term in KNOWLEDGE_HELP_TERMS) or ("как" in compact and "lightrag" in compact)
+
+
+def is_lightrag_status_text(text: str) -> bool:
+    compact = compact_text(text)
+    mentions_lightrag = "lightrag" in compact or "light rag" in compact or "лайтраг" in compact
+    if not mentions_lightrag:
+        return False
+    if any(term in compact for term in KNOWLEDGE_HELP_TERMS):
+        return False
+    return any(term in compact for term in LIGHTRAG_STATUS_TERMS) or compact.rstrip("?").strip() in {"lightrag", "light rag", "лайтраг"}
+
+
 def is_save_intent_text(text: str) -> bool:
     compact = compact_text(text)
     if any(phrase in compact for phrase in SAVE_PHRASES):
@@ -539,6 +732,14 @@ def run_static_self_test() -> int:
     context = [route_context(sample, "Auto")[0] for sample in samples]
     if context[3] != "Web Development" or context[5] != "Web Development":
         failures.append(f"web context routing failed: {context}")
+    if not is_knowledge_lookup_text("Сделай инструкцию из того что у меня сохранено в LightRAG"):
+        failures.append("explicit knowledge lookup was not recognized")
+    if not is_lightrag_help_text("Как мне достать информацию из lightrag?"):
+        failures.append("LightRAG help intent was not recognized")
+    if is_knowledge_lookup_text("lightrag подключен?"):
+        failures.append("LightRAG status question was routed as retrieval")
+    if not is_lightrag_status_text("lightrag подключен?"):
+        failures.append("LightRAG status intent was not recognized")
     if failures:
         print("\n".join(failures))
         return 1
@@ -561,6 +762,8 @@ class KnowledgeChatApp:
         self.status_var = tk.StringVar(value="Ready")
         self.enter_send_var = tk.BooleanVar(value=bool(self.settings["send_on_enter"]))
         self.game_guard_var = tk.BooleanVar(value=bool(self.settings["game_guard_enabled"]))
+        self.auto_process_links_var = tk.BooleanVar(value=bool(self.settings.get("auto_process_links", True)))
+        self.web_search_enabled_var = tk.BooleanVar(value=bool(self.settings.get("web_search_enabled", False)))
         self.button_color_var = tk.StringVar(value=str(self.settings["button_color"]))
         self.obsidian_path_var = tk.StringVar(value=str(self.settings.get("obsidian_path", "")))
         self.vault_path_var = tk.StringVar(value=str(self.settings.get("vault_path", str(DEFAULT_VAULT_DIR))))
@@ -635,6 +838,8 @@ class KnowledgeChatApp:
         settings["send_on_enter"] = bool(settings.get("send_on_enter", DEFAULT_SETTINGS["send_on_enter"]))
         settings["use_lightrag"] = bool(settings.get("use_lightrag", DEFAULT_SETTINGS["use_lightrag"]))
         settings["game_guard_enabled"] = bool(settings.get("game_guard_enabled", DEFAULT_SETTINGS["game_guard_enabled"]))
+        settings["auto_process_links"] = bool(settings.get("auto_process_links", DEFAULT_SETTINGS["auto_process_links"]))
+        settings["web_search_enabled"] = bool(settings.get("web_search_enabled", DEFAULT_SETTINGS["web_search_enabled"]))
         settings["game_guard_delay_seconds"] = max(1, int(settings.get("game_guard_delay_seconds", 5) or 5))
         settings["button_color"] = valid_hex_color(str(settings.get("button_color", "")), DEFAULT_SETTINGS["button_color"])
         settings["obsidian_path"] = str(settings.get("obsidian_path", "") or "")
@@ -651,6 +856,8 @@ class KnowledgeChatApp:
         self.settings["send_on_enter"] = bool(self.settings["send_on_enter"])
         self.settings["use_lightrag"] = bool(self.settings["use_lightrag"])
         self.settings["game_guard_enabled"] = bool(self.settings["game_guard_enabled"])
+        self.settings["auto_process_links"] = bool(self.settings.get("auto_process_links", True))
+        self.settings["web_search_enabled"] = bool(self.settings.get("web_search_enabled", False))
         self.settings["game_guard_delay_seconds"] = max(1, int(self.settings.get("game_guard_delay_seconds", 5) or 5))
         self.settings["button_color"] = valid_hex_color(str(self.settings["button_color"]), DEFAULT_SETTINGS["button_color"])
         self.settings["obsidian_path"] = str(self.settings.get("obsidian_path", "") or "")
@@ -802,7 +1009,14 @@ class KnowledgeChatApp:
         self.populate_chat_list()
         self.render_current_chat()
 
-    def add_message(self, role: str, text: str, context_name: str = "General", warnings: list[str] | None = None) -> None:
+    def add_message(
+        self,
+        role: str,
+        text: str,
+        context_name: str = "General",
+        warnings: list[str] | None = None,
+        lightrag_used: bool | None = None,
+    ) -> None:
         chat = self.get_active_chat()
         if not chat:
             self.create_chat(save=False)
@@ -814,7 +1028,7 @@ class KnowledgeChatApp:
             "ts": now_iso(),
             "role": role,
             "context": context_name,
-            "lightrag": bool(self.lightrag_var.get()),
+            "lightrag": bool(self.lightrag_var.get()) if lightrag_used is None else bool(lightrag_used),
             "text": text,
             "warnings": warnings or [],
         }
@@ -844,6 +1058,24 @@ class KnowledgeChatApp:
         except Exception:
             return ""
 
+    def chat_group_name(self, chat: dict) -> str:
+        messages = chat.get("messages", [])
+        contexts = [
+            str(message.get("context") or "")
+            for message in messages
+            if isinstance(message, dict) and message.get("context")
+        ]
+        if "Web Development" in contexts:
+            return "Web Development"
+        if "My Game" in contexts:
+            return "My Game"
+        title = str(chat.get("title") or "").strip()
+        if title and title != "Новый чат":
+            topic = infer_topic(title, "general")
+            if topic not in {"General", "Web", "Project Notes"}:
+                return topic
+        return "Без темы"
+
     def populate_chat_list(self, keep_selection: bool = False) -> None:
         if not hasattr(self, "chat_rows"):
             return
@@ -862,12 +1094,37 @@ class KnowledgeChatApp:
             self.chat_row_widgets.append(empty)
             return
 
-        for index, chat in enumerate(chats):
+        grouped: dict[str, list[dict]] = {}
+        for chat in chats:
+            grouped.setdefault(self.chat_group_name(chat), []).append(chat)
+
+        ordered_groups = [name for name in ("Web Development", "My Game", "Без темы") if name in grouped]
+        ordered_groups.extend(sorted(name for name in grouped if name not in ordered_groups))
+
+        row_index = 0
+        for group_name in ordered_groups:
+            section = tk.Label(
+                self.chat_rows,
+                text=group_name,
+                bg="#eef2f5",
+                fg="#8a939d",
+                anchor="w",
+                font=("Segoe UI", 8),
+            )
+            section.grid(row=row_index, column=0, sticky="ew", padx=14, pady=(12 if row_index else 4, 4))
+            self.chat_row_widgets.append(section)
+            row_index += 1
+
+            for chat in grouped[group_name]:
+                self.add_chat_sidebar_row(chat, row_index)
+                row_index += 1
+
+    def add_chat_sidebar_row(self, chat: dict, row_index: int) -> None:
             chat_id = str(chat.get("id"))
             is_active = chat_id == self.active_chat_id
             row_bg = "#dfe6ed" if is_active else "#eef2f5"
             row = tk.Frame(self.chat_rows, bg=row_bg, padx=8, pady=6)
-            row.grid(row=index, column=0, sticky="ew", padx=6, pady=2)
+            row.grid(row=row_index, column=0, sticky="ew", padx=6, pady=2)
             row.columnconfigure(0, weight=1)
             title = str(chat.get("title") or "Чат")
             title_label = tk.Label(
@@ -910,39 +1167,44 @@ class KnowledgeChatApp:
 
         toolbar = ttk.Frame(self.root, padding=(14, 10), style="Top.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.columnconfigure(4, weight=1)
+        toolbar.columnconfigure(3, weight=1)
 
         ttk.Label(toolbar, text="LightRAG Chat", style="Header.TLabel").grid(row=0, column=0, padx=(0, 18))
 
-        if OBSIDIAN_ICON.exists():
-            self.obsidian_raw_image = tk.PhotoImage(file=str(OBSIDIAN_ICON))
-            factor = max(1, self.obsidian_raw_image.width() // 30)
-            self.obsidian_image = self.obsidian_raw_image.subsample(factor, factor)
-            self.obsidian_button = IconButton(toolbar, self.obsidian_image, self.open_obsidian, size=34, background="#eef2f5")
-        else:
-            self.obsidian_button = ttk.Button(toolbar, text="Ob", width=3, command=self.open_obsidian)
-        self.obsidian_button.grid(row=0, column=1, padx=(0, 10))
-        self.add_tooltip(self.obsidian_button, "Открыть приложение Obsidian. Если путь не найден, можно указать Obsidian.exe.")
-
         self.settings_button = ttk.Button(toolbar, text="Настройки", command=self.open_settings)
-        self.settings_button.grid(row=0, column=2, padx=(0, 14))
-        self.add_tooltip(self.settings_button, "Enter, LightRAG, цвет кнопок, Obsidian и Game Guard.")
+        self.settings_button.grid(row=0, column=1, padx=(0, 14))
+        self.add_tooltip(self.settings_button, "Enter, LightRAG, цвет кнопок, Obsidian, ссылки и Game Guard.")
 
         self.control_button = ttk.Button(toolbar, text="Control", command=self.open_light_rag_control)
-        self.control_button.grid(row=0, column=3, padx=(0, 14))
+        self.control_button.grid(row=0, column=2, padx=(0, 14))
         self.add_tooltip(self.control_button, "Открыть LightRAG-Control для проверки LM Studio, моделей, индексов и импорта.")
 
-        ttk.Label(toolbar, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=5, sticky="e")
+        ttk.Label(toolbar, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=4, sticky="e", padx=(0, 10))
+
+        if OBSIDIAN_ICON.exists():
+            self.obsidian_raw_image = tk.PhotoImage(file=str(OBSIDIAN_ICON))
+            factor = max(1, self.obsidian_raw_image.width() // 34)
+            self.obsidian_image = self.obsidian_raw_image.subsample(factor, factor)
+            self.obsidian_button = IconButton(toolbar, self.obsidian_image, self.open_obsidian, size=38, background="#eef2f5")
+        else:
+            self.obsidian_button = ttk.Button(toolbar, text="Ob", width=3, command=self.open_obsidian)
+        self.obsidian_button.grid(row=0, column=5, sticky="e")
+        self.add_tooltip(self.obsidian_button, "Открыть приложение Obsidian. Если путь не найден, можно указать Obsidian.exe.")
 
         main = ttk.Frame(self.root, padding=(12, 12, 12, 14), style="App.TFrame")
         main.grid(row=1, column=0, sticky="nsew")
+        main.columnconfigure(0, weight=0, minsize=260)
         main.columnconfigure(1, weight=1)
         main.rowconfigure(0, weight=1)
 
         sidebar_shell = tk.Frame(main, bg="#cfd4da", padx=1, pady=1)
-        sidebar_shell.grid(row=0, column=0, sticky="ns", padx=(0, 10))
-        sidebar = tk.Frame(sidebar_shell, bg="#eef2f5", width=238)
-        sidebar.grid(row=0, column=0, sticky="ns")
+        sidebar_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        sidebar_shell.configure(width=260)
+        sidebar_shell.grid_propagate(False)
+        sidebar_shell.columnconfigure(0, weight=1)
+        sidebar_shell.rowconfigure(0, weight=1)
+        sidebar = tk.Frame(sidebar_shell, bg="#eef2f5", width=258)
+        sidebar.grid(row=0, column=0, sticky="nsew")
         sidebar.grid_propagate(False)
         sidebar.columnconfigure(0, weight=1)
         sidebar.rowconfigure(1, weight=1)
@@ -1001,6 +1263,7 @@ class KnowledgeChatApp:
         input_shell = tk.Frame(input_frame, bg="#cfd4da", padx=1, pady=1)
         input_shell.grid(row=0, column=0, sticky="ew")
         input_shell.columnconfigure(0, weight=1)
+        input_shell.columnconfigure(1, weight=0)
 
         self.input = tk.Text(
             input_shell,
@@ -1016,6 +1279,9 @@ class KnowledgeChatApp:
             font=("Segoe UI", 10),
         )
         self.input.grid(row=0, column=0, sticky="ew")
+        self.web_search_button = WebSearchToggleButton(input_shell, self.toggle_web_search, size=42, background="#ffffff")
+        self.web_search_button.grid(row=0, column=1, sticky="ns")
+        self.add_tooltip(self.web_search_button, "Включить/выключить web-поиск для следующих сообщений.")
         self.input.bind("<Control-Return>", self.on_ctrl_return)
         self.input.bind("<Shift-Return>", self.on_shift_return)
         self.input.bind("<Return>", self.on_return)
@@ -1046,10 +1312,13 @@ class KnowledgeChatApp:
         self.enter_send_var.set(bool(self.settings["send_on_enter"]))
         self.lightrag_var.set(bool(self.settings["use_lightrag"]))
         self.game_guard_var.set(bool(self.settings["game_guard_enabled"]))
+        self.auto_process_links_var.set(bool(self.settings.get("auto_process_links", True)))
+        self.web_search_enabled_var.set(bool(self.settings.get("web_search_enabled", False)))
         self.button_color_var.set(str(self.settings["button_color"]))
         self.obsidian_path_var.set(str(self.settings.get("obsidian_path", "")))
         self.vault_path_var.set(str(self.settings.get("vault_path", str(DEFAULT_VAULT_DIR))))
         self.update_button_colors()
+        self.update_web_search_button()
         self.on_lightrag_toggle(save=False)
 
     def update_button_colors(self) -> None:
@@ -1057,6 +1326,10 @@ class KnowledgeChatApp:
         fg = readable_text_color(color)
         active_bg = adjust_hex_color(color, 0.86)
         self.send_button.set_colors(bg=color, active_bg=active_bg, fg=fg)
+
+    def update_web_search_button(self) -> None:
+        if hasattr(self, "web_search_button"):
+            self.web_search_button.set_active(bool(self.settings.get("web_search_enabled", False)))
 
     def open_settings(self) -> None:
         if self.settings_window and self.settings_window.winfo_exists():
@@ -1066,6 +1339,8 @@ class KnowledgeChatApp:
         self.enter_send_var.set(bool(self.settings["send_on_enter"]))
         self.lightrag_var.set(bool(self.settings["use_lightrag"]))
         self.game_guard_var.set(bool(self.settings["game_guard_enabled"]))
+        self.auto_process_links_var.set(bool(self.settings.get("auto_process_links", True)))
+        self.web_search_enabled_var.set(bool(self.settings.get("web_search_enabled", False)))
         self.button_color_var.set(str(self.settings["button_color"]))
         self.obsidian_path_var.set(str(self.settings.get("obsidian_path", "")))
         self.vault_path_var.set(str(self.settings.get("vault_path", str(DEFAULT_VAULT_DIR))))
@@ -1087,30 +1362,32 @@ class KnowledgeChatApp:
         ttk.Checkbutton(frame, text="Enter отправляет сообщение", variable=self.enter_send_var).grid(row=1, column=0, columnspan=3, sticky="w", pady=3)
         ttk.Checkbutton(frame, text="Использовать LightRAG по умолчанию", variable=self.lightrag_var).grid(row=2, column=0, columnspan=3, sticky="w", pady=3)
         ttk.Checkbutton(frame, text="Game Guard проверяет GPU после открытия чата", variable=self.game_guard_var).grid(row=3, column=0, columnspan=3, sticky="w", pady=3)
+        ttk.Checkbutton(frame, text="Автоматически обрабатывать сохраненные ссылки", variable=self.auto_process_links_var).grid(row=4, column=0, columnspan=3, sticky="w", pady=3)
+        ttk.Checkbutton(frame, text="Веб-поиск включен по умолчанию", variable=self.web_search_enabled_var).grid(row=5, column=0, columnspan=3, sticky="w", pady=3)
 
-        ttk.Separator(frame, orient="horizontal").grid(row=4, column=0, columnspan=3, sticky="ew", pady=(14, 12))
-        ttk.Label(frame, text="Obsidian", style="SettingsHeader.TLabel").grid(row=5, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Separator(frame, orient="horizontal").grid(row=6, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+        ttk.Label(frame, text="Obsidian", style="SettingsHeader.TLabel").grid(row=7, column=0, columnspan=3, sticky="w", pady=(0, 8))
         obsidian_entry = ttk.Entry(frame, textvariable=self.obsidian_path_var, width=54)
-        obsidian_entry.grid(row=6, column=0, columnspan=2, sticky="ew", padx=(0, 8))
-        ttk.Button(frame, text="Выбрать...", command=self.choose_obsidian_path).grid(row=6, column=2, sticky="e")
-        ttk.Label(frame, text="Vault folder", background="#f4f6f8").grid(row=7, column=0, columnspan=3, sticky="w", pady=(10, 4))
+        obsidian_entry.grid(row=8, column=0, columnspan=2, sticky="ew", padx=(0, 8))
+        ttk.Button(frame, text="Выбрать...", command=self.choose_obsidian_path).grid(row=8, column=2, sticky="e")
+        ttk.Label(frame, text="Vault folder", background="#f4f6f8").grid(row=9, column=0, columnspan=3, sticky="w", pady=(10, 4))
         vault_entry = ttk.Entry(frame, textvariable=self.vault_path_var, width=54)
-        vault_entry.grid(row=8, column=0, columnspan=2, sticky="ew", padx=(0, 8))
-        ttk.Button(frame, text="Выбрать...", command=self.choose_vault_path).grid(row=8, column=2, sticky="e")
+        vault_entry.grid(row=10, column=0, columnspan=2, sticky="ew", padx=(0, 8))
+        ttk.Button(frame, text="Выбрать...", command=self.choose_vault_path).grid(row=10, column=2, sticky="e")
 
-        ttk.Separator(frame, orient="horizontal").grid(row=9, column=0, columnspan=3, sticky="ew", pady=(14, 12))
-        ttk.Label(frame, text="Цвет основной кнопки", style="SettingsHeader.TLabel").grid(row=10, column=0, columnspan=3, sticky="w", pady=(0, 10))
+        ttk.Separator(frame, orient="horizontal").grid(row=11, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+        ttk.Label(frame, text="Цвет основной кнопки", style="SettingsHeader.TLabel").grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 10))
         preset_var = tk.StringVar(value=self.color_preset_name(self.button_color_var.get()))
         preset = ttk.Combobox(frame, textvariable=preset_var, values=list(BUTTON_COLOR_PRESETS.keys()), state="readonly", width=18)
-        preset.grid(row=11, column=0, sticky="w", padx=(0, 10))
+        preset.grid(row=13, column=0, sticky="w", padx=(0, 10))
         preset.bind("<<ComboboxSelected>>", lambda _event: self.select_color_preset(preset_var.get()))
         self.settings_color_preview = tk.Label(frame, width=6, height=1, background=self.button_color_var.get(), relief="solid", borderwidth=1)
-        self.settings_color_preview.grid(row=11, column=1, sticky="w", padx=(0, 10))
-        ttk.Button(frame, text="Выбрать...", command=self.choose_button_color).grid(row=11, column=2, sticky="e")
+        self.settings_color_preview.grid(row=13, column=1, sticky="w", padx=(0, 10))
+        ttk.Button(frame, text="Выбрать...", command=self.choose_button_color).grid(row=13, column=2, sticky="e")
 
-        ttk.Label(frame, textvariable=self.settings_status_var, style="SettingsStatus.TLabel").grid(row=12, column=0, columnspan=3, sticky="w", pady=(14, 0))
+        ttk.Label(frame, textvariable=self.settings_status_var, style="SettingsStatus.TLabel").grid(row=14, column=0, columnspan=3, sticky="w", pady=(14, 0))
         buttons = ttk.Frame(frame, style="App.TFrame")
-        buttons.grid(row=13, column=0, columnspan=3, sticky="e", pady=(16, 0))
+        buttons.grid(row=15, column=0, columnspan=3, sticky="e", pady=(16, 0))
         ttk.Button(buttons, text="Отмена", command=self.close_settings).grid(row=0, column=0, padx=(0, 8))
         ttk.Button(buttons, text="Сохранить", command=self.save_settings_from_window).grid(row=0, column=1)
 
@@ -1174,6 +1451,8 @@ class KnowledgeChatApp:
         self.settings["use_lightrag"] = bool(self.lightrag_var.get())
         self.settings["button_color"] = valid_hex_color(self.button_color_var.get(), DEFAULT_SETTINGS["button_color"])
         self.settings["game_guard_enabled"] = bool(self.game_guard_var.get())
+        self.settings["auto_process_links"] = bool(self.auto_process_links_var.get())
+        self.settings["web_search_enabled"] = bool(self.web_search_enabled_var.get())
         self.settings["obsidian_path"] = self.obsidian_path_var.get().strip()
         self.settings["vault_path"] = self.vault_path_var.get().strip() or str(DEFAULT_VAULT_DIR)
         self.save_settings()
@@ -1373,7 +1652,7 @@ class KnowledgeChatApp:
             output = "Не удалось подключиться к LM Studio во время ответа. Откройте LightRAG-Control для проверки сервера и модели."
             tag = "error"
             warnings = pending_warnings
-        self.root.after(0, self.finish_query, operation_id, output, tag, warnings)
+        self.root.after(0, self.finish_query, operation_id, output, tag, warnings, False)
 
     def render_current_chat(self) -> None:
         self.chat.configure(state="normal")
@@ -1407,8 +1686,8 @@ class KnowledgeChatApp:
 
     def show_intro(self) -> None:
         intro = (
-            "Можно писать обычные сообщения или вопросы. LightRAG подключается только когда он включен и индекс готов.\n"
-            "Ссылки и заметки можно сохранять прямо из диалога: например, «вот ссылка ...»."
+            "Можно писать обычные сообщения или вопросы. Чтобы спросить по базе, напишите «найди в базе...» или включите LightRAG в Настройках.\n"
+            "Ссылки можно сохранять прямо из диалога: «вот ссылка ...». Веб-поиск запускается кнопкой у поля ввода."
         )
         self.append_system(intro, persist=False)
 
@@ -1479,7 +1758,14 @@ class KnowledgeChatApp:
             context_name, _scope, _project = self.selected_route(clean_text)
             self.add_message("user", clean_text, context_name)
 
-    def append_assistant_message(self, text: str, tag: str = "assistant", persist: bool = True, warnings: list[str] | None = None) -> None:
+    def append_assistant_message(
+        self,
+        text: str,
+        tag: str = "assistant",
+        persist: bool = True,
+        warnings: list[str] | None = None,
+        lightrag_used: bool | None = None,
+    ) -> None:
         clean_text = text.strip()
         if not clean_text:
             return
@@ -1489,7 +1775,7 @@ class KnowledgeChatApp:
             context_name = "General"
             if chat and chat.get("messages"):
                 context_name = str(chat["messages"][-1].get("context") or "General")
-            self.add_message("assistant" if tag == "assistant" else "error", clean_text, context_name, warnings)
+            self.add_message("assistant" if tag == "assistant" else "error", clean_text, context_name, warnings, lightrag_used)
 
     def append_warning_message(self, text: str, persist: bool = False) -> None:
         clean_text = text.strip()
@@ -1581,6 +1867,29 @@ class KnowledgeChatApp:
         self.clear_input()
         self.input.insert("1.0", text)
 
+    def toggle_web_search(self) -> None:
+        if self.busy:
+            return
+        enabled = not bool(self.settings.get("web_search_enabled", False))
+        self.settings["web_search_enabled"] = enabled
+        self.web_search_enabled_var.set(enabled)
+        self.save_settings()
+        self.update_web_search_button()
+        self.status_var.set("Web search on" if enabled else "Web search off")
+        self.append_warning_message(
+            "Web-поиск включен. Следующее обычное сообщение откроет поиск по теме." if enabled else "Web-поиск выключен.",
+            persist=False,
+        )
+
+    def open_web_search_for_query(self, query: str, *, persist: bool = False) -> None:
+        query = query.strip()
+        if not query:
+            self.append_warning_message("Введите тему или вопрос, затем нажмите веб-поиск.", persist=False)
+            return
+        url = f"https://www.google.com/search?q={quote_plus(query)}"
+        webbrowser.open(url)
+        self.append_warning_message(f"Открыл web-поиск по теме: {query[:120]}", persist=persist)
+
     def load_input_history(self) -> None:
         questions: list[str] = []
         for chat in self.get_chats():
@@ -1609,6 +1918,52 @@ class KnowledgeChatApp:
 
     def is_save_intent(self, text: str) -> bool:
         return is_save_intent_text(text)
+
+    def is_lightrag_help_intent(self, text: str) -> bool:
+        return is_lightrag_help_text(text)
+
+    def is_lightrag_status_intent(self, text: str) -> bool:
+        return is_lightrag_status_text(text)
+
+    def wants_knowledge_lookup(self, text: str) -> bool:
+        return is_knowledge_lookup_text(text)
+
+    def lightrag_status_message(self, text: str) -> str:
+        context_name, scope, project = self.selected_route(text)
+        setting = bool(self.settings.get("use_lightrag", False))
+        index_ready = self.is_lightrag_ready(scope, project)
+        last_used = self.last_answer_lightrag_state()
+        if last_used is True:
+            last_text = "последний ответ был из LightRAG"
+        elif last_used is False:
+            last_text = "последний ответ был обычной LLM"
+        else:
+            last_text = "ответов в этом чате еще нет"
+        return (
+            f"LightRAG: {'включен' if setting else 'выключен'} в настройках; "
+            f"индекс для {context_name}: {'найден' if index_ready else 'не найден'}; "
+            f"{last_text}."
+        )
+
+    def last_answer_lightrag_state(self) -> bool | None:
+        chat = self.get_active_chat()
+        if not chat:
+            return None
+        for message in reversed(chat.get("messages", [])):
+            if message.get("role") in {"assistant", "error"}:
+                return bool(message.get("lightrag", False))
+        return None
+
+    def lightrag_help_message(self) -> str:
+        enabled = bool(self.settings.get("use_lightrag", False))
+        state = "включен" if enabled else "выключен"
+        return (
+            f"LightRAG сейчас {state}. Чтобы получить ответ из сохраненных материалов, "
+            "включите LightRAG в Настройках или явно попросите поиск по базе: "
+            "«найди в базе материалы про CSS», «что у меня сохранено про лендинги», "
+            "«сделай инструкцию из сохраненных материалов». "
+            "Если я напишу, что индекс не готов, откройте LightRAG-Control и запустите проверку или переиндексацию."
+        )
 
     def choose_capture_context(self, suggested: tuple[str, str, str]) -> tuple[str, str, str] | None:
         context_name, scope, project = suggested
@@ -1651,6 +2006,118 @@ class KnowledgeChatApp:
         path.write_text(render_capture_markdown(text, context_name, scope, project, topic, kind), encoding="utf-8-sig")
         return path.relative_to(VAULT_DIR).as_posix()
 
+    def capture_path_from_rel(self, rel_path: str) -> Path:
+        return VAULT_DIR / rel_path.replace("/", os.sep)
+
+    def python_executable(self) -> str:
+        candidate = ROOT / "LightRAG" / ".venv" / "Scripts" / "python.exe"
+        return str(candidate if candidate.exists() else sys.executable)
+
+    def start_auto_material_processing(self, text: str, route: tuple[str, str, str], rel_path: str) -> None:
+        if not bool(self.settings.get("auto_process_links", True)):
+            return
+        url = first_url(text)
+        if not url:
+            return
+        kind = infer_kind(text)
+        if kind == "youtube_link":
+            self.append_warning_message("Запустил обработку YouTube-ссылки: транскрипт и обновление LightRAG пойдут в фоне.", persist=False)
+            threading.Thread(target=self.auto_process_youtube_worker, args=(route,), daemon=True).start()
+        elif kind == "article":
+            self.append_warning_message("Запустил обработку web-страницы: попробую сохранить текст статьи и обновить LightRAG в фоне.", persist=False)
+            threading.Thread(target=self.auto_process_article_worker, args=(url, route, rel_path), daemon=True).start()
+
+    def auto_process_youtube_worker(self, route: tuple[str, str, str]) -> None:
+        _context_name, scope, project = route
+        command = [
+            self.python_executable(),
+            str(SCRIPTS_DIR / "sync-youtube-links.py"),
+            "--vault-dir",
+            str(VAULT_DIR),
+            "--scope",
+            scope,
+            "--continue-on-error",
+        ]
+        if scope in {"game", "web"} and project:
+            command.extend(["--project", project])
+        ok, message = self.run_background_material_command(command, f"auto-youtube-{scope}")
+        if ok:
+            self.launch_reindex(route)
+            self.root.after(0, self.append_warning_message, "YouTube-транскрипт обработан; обновление LightRAG запущено в фоне.", False)
+        else:
+            self.root.after(0, self.append_warning_message, f"YouTube-ссылка сохранена, но транскрипт не удалось получить автоматически: {message}", False)
+
+    def auto_process_article_worker(self, url: str, route: tuple[str, str, str], rel_path: str) -> None:
+        path = self.capture_path_from_rel(rel_path)
+        try:
+            title, markdown = fetch_article_markdown(url)
+            if not markdown:
+                raise RuntimeError("страница не дала читаемый текст")
+            with path.open("a", encoding="utf-8-sig") as handle:
+                handle.write("\n## Parsed Page\n\n")
+                handle.write(f"Parsed at: {now_iso()}\n\n")
+                if title:
+                    handle.write(f"Page title: {title}\n\n")
+                handle.write(markdown)
+                handle.write("\n")
+            self.launch_reindex(route)
+            self.root.after(0, self.append_warning_message, "Текст web-страницы сохранен в Markdown; обновление LightRAG запущено в фоне.", False)
+        except Exception as exc:
+            self.root.after(0, self.append_warning_message, f"Ссылка сохранена, но страницу не удалось автоматически распарсить: {exc}", False)
+
+    def run_background_material_command(self, command: list[str], log_name: str) -> tuple[bool, str]:
+        log_dir = ROOT / "tmp"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^a-z0-9_-]+", "-", log_name.lower()).strip("-") or "material"
+        log_path = log_dir / f"{safe_name}.log"
+        err_path = log_dir / f"{safe_name}.err.log"
+        try:
+            with log_path.open("a", encoding="utf-8") as stdout, err_path.open("a", encoding="utf-8") as stderr:
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(ROOT),
+                    stdout=stdout,
+                    stderr=stderr,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                code = process.wait(timeout=240)
+            if code == 0:
+                return True, str(log_path)
+            return False, f"код {code}; лог: {err_path}"
+        except Exception as exc:
+            return False, str(exc)
+
+    def launch_reindex(self, route: tuple[str, str, str]) -> None:
+        _context_name, scope, project = route
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(SCRIPTS_DIR / "ingest-vault-scope-lmstudio.ps1"),
+            "-Scope",
+            scope,
+        ]
+        if scope in {"game", "web"} and project:
+            command.extend(["-Project", project])
+        env = dict(os.environ)
+        env["KNOWLEDGELAB_VAULT_DIR"] = str(VAULT_DIR)
+        try:
+            subprocess.Popen(
+                command,
+                cwd=str(ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                env=env,
+            )
+        except Exception:
+            pass
+
     def on_ctrl_return(self, _event: tk.Event | None = None) -> str:
         self.on_send()
         return "break"
@@ -1672,10 +2139,19 @@ class KnowledgeChatApp:
             return
 
         context_name, scope, project = self.selected_route(question)
+        explicit_knowledge_lookup = self.wants_knowledge_lookup(question)
         prompt = self.build_prompt_with_history(question)
         self.append_user_message(question)
         self.remember_input(question)
         self.clear_input()
+
+        if self.is_lightrag_status_intent(question):
+            self.append_assistant_message(self.lightrag_status_message(question), lightrag_used=False)
+            return
+
+        if self.is_lightrag_help_intent(question):
+            self.append_assistant_message(self.lightrag_help_message(), lightrag_used=False)
+            return
 
         if self.is_save_intent(question):
             route = self.choose_capture_context((context_name, scope, project))
@@ -1685,11 +2161,15 @@ class KnowledgeChatApp:
             try:
                 rel_path = self.save_capture(question, route)
                 self.append_assistant_message(f"Сохранил в Obsidian: {rel_path}")
+                self.start_auto_material_processing(question, route, rel_path)
             except Exception as exc:
                 self.append_assistant_message(f"Не удалось сохранить заметку: {exc}\nОткройте LightRAG-Control для диагностики.", "error")
             return
 
-        use_lightrag = bool(self.lightrag_var.get())
+        if bool(self.settings.get("web_search_enabled", False)):
+            self.open_web_search_for_query(question, persist=False)
+
+        use_lightrag = bool(self.lightrag_var.get()) or explicit_knowledge_lookup
         warnings: list[str] = []
         lm_ready, lm_message, _models = self.check_lmstudio_ready(require_models=True)
         if not lm_ready:
@@ -1698,14 +2178,25 @@ class KnowledgeChatApp:
 
         if use_lightrag and not self.is_lightrag_ready(scope, project):
             use_lightrag = False
-            self.lightrag_var.set(False)
-            self.settings["use_lightrag"] = False
-            self.save_settings()
+            if bool(self.lightrag_var.get()):
+                self.lightrag_var.set(False)
+                self.settings["use_lightrag"] = False
+                self.save_settings()
             warnings.append(f"LightRAG недоступен для {context_name}: индекс еще не готов. Ответ будет создан обычной LLM.")
+        elif explicit_knowledge_lookup and use_lightrag:
+            warnings.append(f"LightRAG использован для {context_name}, потому что запрос явно просит найти данные в базе.")
 
         operation_id = self.begin_operation(f"Asking {context_name}...", self.query_timeout_seconds)
         target = self.run_query if use_lightrag else self.run_plain_query
-        args = (operation_id, question, prompt, context_name, scope, project, use_lightrag, warnings) if use_lightrag else (operation_id, prompt, warnings)
+        plain_prompt = prompt
+        if explicit_knowledge_lookup and not use_lightrag:
+            plain_prompt = (
+                "Пользователь просит ответ из локальной базы знаний/LightRAG, но retrieval сейчас недоступен. "
+                "Не утверждай, что ты использовал сохраненные материалы. Сначала коротко скажи, что ответ будет общим, "
+                "а затем помоги по сути вопроса насколько возможно.\n\n"
+                f"{prompt}"
+            )
+        args = (operation_id, question, prompt, context_name, scope, project, use_lightrag, warnings) if use_lightrag else (operation_id, plain_prompt, warnings)
         thread = threading.Thread(target=target, args=args, daemon=True)
         thread.start()
 
@@ -1758,6 +2249,7 @@ class KnowledgeChatApp:
         use_lightrag: bool,
         pending_warnings: list[str],
     ) -> None:
+        lightrag_used_actual = False
         command_base = [
             "powershell",
             "-NoProfile",
@@ -1804,11 +2296,13 @@ class KnowledgeChatApp:
                     tag = "error"
             else:
                 tag = "assistant"
+                lightrag_used_actual = True
             if not output:
                 fallback, model_warning = self.call_plain_lmstudio(raw_question)
                 if fallback:
                     output = fallback
                     tag = "assistant"
+                    lightrag_used_actual = False
                     warnings.append("LightRAG вернул пустой ответ; я повторил запрос обычной LLM.")
                     if model_warning:
                         warnings.append(model_warning)
@@ -1819,16 +2313,20 @@ class KnowledgeChatApp:
             output = f"{exc}\nЗапрос остановлен, чтобы чат не зависал. Можно повторить или открыть LightRAG-Control."
             tag = "error"
             warnings = pending_warnings
+            lightrag_used_actual = False
         except Exception as exc:
             output = f"Не удалось получить ответ: {exc}\nОткройте LightRAG-Control для диагностики."
             tag = "error"
             warnings = pending_warnings
-        self.root.after(0, self.finish_query, operation_id, output, tag, warnings)
+            lightrag_used_actual = False
+        if tag != "assistant":
+            lightrag_used_actual = False
+        self.root.after(0, self.finish_query, operation_id, output, tag, warnings, lightrag_used_actual)
 
-    def finish_query(self, operation_id: int, output: str, tag: str, warnings: list[str]) -> None:
+    def finish_query(self, operation_id: int, output: str, tag: str, warnings: list[str], lightrag_used: bool = False) -> None:
         if not self.is_active_operation(operation_id):
             return
-        self.append_assistant_message(output, tag, warnings=warnings)
+        self.append_assistant_message(output, tag, warnings=warnings, lightrag_used=lightrag_used)
         for warning in warnings:
             self.append_warning_message(warning)
         self.set_busy(False, "Ready")
@@ -1922,6 +2420,8 @@ class KnowledgeChatApp:
         self.send_button.configure(state=state)
         self.cancel_button.configure(state="normal" if busy else "disabled")
         self.clear_button.configure(state=state)
+        if hasattr(self, "web_search_button"):
+            self.web_search_button.configure(state=state)
         if not busy:
             self.cancel_busy_timer()
             self.set_active_process(None)

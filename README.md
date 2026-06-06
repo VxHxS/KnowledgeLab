@@ -6,13 +6,28 @@ KnowledgeLab is a local-first Windows knowledge system that combines LM Studio, 
 
 - Runs a normal local LLM chat through LM Studio by default.
 - Lets the user enable LightRAG retrieval when they want answers from the local knowledge base.
+- Treats the chat as an entry point into a personal library/archive: web links, YouTube links, text notes, Telegram exports, PDFs, DOCX files, and other sources should become lightweight Markdown materials.
 - Falls back to plain LLM answers when LightRAG is off or unavailable, with a small gray note in the chat.
 - Stores knowledge as Markdown in an Obsidian vault.
 - Saves links and notes from the chat into Obsidian when the user says things like `вот ссылка`, `сохрани`, or `добавь в базу`.
-- Keeps chat sessions locally with a left-side history panel, rename, and delete.
+- Parses saved web pages into Markdown when possible.
+- Sends saved YouTube links through transcript sync and starts LightRAG refresh in the background.
+- Provides a web-search toggle near the input. Web search is external; LightRAG remains local and can use web data only after it is saved into the vault.
+- Keeps chat sessions locally with a grouped left-side history panel, rename, and delete.
 - Provides settings for Enter-to-send, LightRAG, button color, Obsidian path, vault path, and Game Guard.
 - Warns about sustained GPU load after the chat opens, so local AI processes do not silently compete with games or other heavy apps.
 - Provides LightRAG-Control for checks, maintenance indexing, imports, model stop, and troubleshooting.
+
+## User Quick Start
+
+To make the chat answer through LM Studio:
+
+1. Open LM Studio.
+2. Go to `Developer` -> `Local Server`.
+3. Turn the server on and check that it is reachable at `http://127.0.0.1:1234`.
+4. Download and load `qwen/qwen3-14b`.
+5. For LightRAG/indexing, also load the Nomic embedding model. The API id used by this project is `text-embedding-nomic-embed-text-v1.5`.
+6. If the chat still shows a diagnostic, open `LightRAG-Control` and run the checks.
 
 ## Desktop Apps
 
@@ -65,11 +80,31 @@ Default behavior:
 - LightRAG is off by default.
 - Plain LM Studio answers go directly through `http://127.0.0.1:1234/v1/chat/completions`.
 - A gray italic note says when the answer did not use LightRAG.
+- If a message explicitly asks to search the local knowledge base, saved materials, or Obsidian, the chat treats it as a retrieval request.
+- Simple status questions such as `lightrag подключен?` are answered by the app status layer, not by retrieval.
 - If LightRAG is enabled in Settings but the index is missing, LightRAG turns off and the answer continues through plain LM Studio.
-- The left column stores local chat sessions.
+- The left column stores local chat sessions grouped by project/topic.
+- The web-search icon near the input toggles web mode. When it is on, normal messages open a browser search for the current topic and still continue through the LLM.
 - The Obsidian icon opens the Obsidian app; if it is not found, the user can choose `Obsidian.exe` or open the Obsidian website.
 - Maintenance actions such as reindexing are handled in `LightRAG-Control`, not as large buttons in the chat.
 - Game Guard is not installed into Windows startup; the chat samples GPU load only while the chat window is open.
+
+## Material Pipeline
+
+KnowledgeLab should keep permanent storage lightweight:
+
+- Web pages are saved as Markdown notes and parsed text when possible.
+- YouTube links are stored as link notes, then converted into transcript Markdown through `sync-youtube-links.py`.
+- Heavy source files should be temporary inputs. After processing, keep extracted text, transcript, metadata, and references, not the original large file.
+- PDF, DOCX, social networks, arbitrary video links, audio transcription, and transcript cleanup are planned as importer modules around the same Markdown-first pipeline.
+
+## Optimization Notes
+
+The “Karpathy method” is treated here as context-engineering practice: clearer prompts, retrieval audits, evaluation questions, and better knowledge organization. It is not a separate model or magic module.
+
+Google TurboQuant may become relevant later for vector-search or KV-cache compression, but it is not a fix for chat routing or UI diagnostics.
+
+Google Quantum AI / AlphaQubit is not relevant to this local RAG chat architecture; it targets quantum error correction, not personal-library retrieval.
 
 ## LightRAG-Control
 
@@ -155,7 +190,7 @@ Default model identifiers:
 
 ```text
 LLM: qwen/qwen3-14b
-Embeddings: nomic-embed
+Embeddings: text-embedding-nomic-embed-text-v1.5
 ```
 
 ## Repository Notes

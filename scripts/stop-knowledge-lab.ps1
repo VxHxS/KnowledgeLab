@@ -10,7 +10,7 @@ Write-Host "Unloading Knowledge Lab models..."
 & $Lms unload qwen3-14b
 & $Lms unload qwen/qwen3-14b
 & $Lms unload qwen-local
-& $Lms unload nomic-embed
+& $Lms unload text-embedding-nomic-embed-text-v1.5
 
 Write-Host "Stopping LM Studio server..."
 & $Lms server stop

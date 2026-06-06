@@ -14,7 +14,7 @@ VAULT_DIR = ROOT / "Obsidian-Test-Vault"
 BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
 API_KEY = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
 LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
-EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "nomic-embed")
+EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 
 
 def collect_chunks(max_chars: int = 1200) -> list[dict[str, str]]:

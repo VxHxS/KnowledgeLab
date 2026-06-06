@@ -50,7 +50,7 @@ function Test-LmStudioApiReady {
     $llm = $env:LMSTUDIO_LLM_MODEL
     if (-not $llm) { $llm = "qwen/qwen3-14b" }
     $embedding = $env:LMSTUDIO_EMBEDDING_MODEL
-    if (-not $embedding) { $embedding = "nomic-embed" }
+    if (-not $embedding) { $embedding = "text-embedding-nomic-embed-text-v1.5" }
 
     try {
         $models = Invoke-RestMethod -Uri "$baseUrl/models" -TimeoutSec 3
