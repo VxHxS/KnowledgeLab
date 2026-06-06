@@ -12,7 +12,8 @@ KnowledgeLab is a local-first Windows knowledge system that combines LM Studio, 
 - Saves links and notes from the chat into Obsidian when the user says things like `вот ссылка`, `сохрани`, or `добавь в базу`.
 - Parses saved web pages into Markdown when possible.
 - Sends saved YouTube links through transcript sync and starts LightRAG refresh in the background.
-- Provides a web-search toggle near the input. Web search is external; LightRAG remains local and can use web data only after it is saved into the vault.
+- Provides a web-search toggle near the input. When enabled, the chat fetches web-search snippets and gives them to the LLM as temporary context.
+- Keeps LightRAG local-only. LightRAG can use web data only after a page, video, or source is saved into the vault and indexed.
 - Keeps chat sessions locally with a grouped left-side history panel, rename, and delete.
 - Provides settings for Enter-to-send, LightRAG, button color, Obsidian path, vault path, and Game Guard.
 - Warns about sustained GPU load after the chat opens, so local AI processes do not silently compete with games or other heavy apps.
@@ -84,7 +85,8 @@ Default behavior:
 - Simple status questions such as `lightrag подключен?` are answered by the app status layer, not by retrieval.
 - If LightRAG is enabled in Settings but the index is missing, LightRAG turns off and the answer continues through plain LM Studio.
 - The left column stores local chat sessions grouped by project/topic.
-- The web-search icon near the input toggles web mode. When it is on, normal messages open a browser search for the current topic and still continue through the LLM.
+- The web-search icon near the input toggles web context mode. When it is on, normal messages fetch search snippets and pass them into the LLM prompt; the browser is not opened for the user.
+- LightRAG itself does not search the web. It retrieves from local indexed storage. Web material becomes LightRAG knowledge only after the material pipeline saves and indexes it.
 - The Obsidian icon opens the Obsidian app; if it is not found, the user can choose `Obsidian.exe` or open the Obsidian website.
 - Maintenance actions such as reindexing are handled in `LightRAG-Control`, not as large buttons in the chat.
 - Game Guard is not installed into Windows startup; the chat samples GPU load only while the chat window is open.

@@ -11,7 +11,7 @@ import threading
 import time
 import tkinter as tk
 from html.parser import HTMLParser
-from urllib.parse import quote_plus
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -29,7 +29,9 @@ LEGACY_HISTORY_PATH = Path(os.getenv("KNOWLEDGELAB_LEGACY_HISTORY_PATH", str(ROO
 CHAT_STORE_PATH = Path(os.getenv("KNOWLEDGELAB_CHAT_STORE_PATH", str(ROOT / "tmp" / "knowledge-chat-sessions.json")))
 SETTINGS_PATH = Path(os.getenv("KNOWLEDGELAB_CHAT_SETTINGS_PATH", str(ROOT / "tmp" / "knowledge-chat-settings.json")))
 OBSIDIAN_ICON = ROOT / "assets" / "icons" / "Obsidian.png"
-WEB_ICON = ROOT / "assets" / "icons" / "web.svg"
+NEW_CHAT_ICON = ROOT / "assets" / "icons" / "new-chat.png"
+WEB_SEARCH_ICON = ROOT / "assets" / "icons" / "web-search.png"
+RENAME_CHAT_ICON = ROOT / "assets" / "icons" / "rename-chat.png"
 LMSTUDIO_API_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 DEFAULT_LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
 DEFAULT_EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
@@ -336,7 +338,15 @@ class IconButton(tk.Canvas):
 
 
 class WebSearchToggleButton(tk.Canvas):
-    def __init__(self, parent: tk.Widget, command, *, size: int = 42, background: str = "#ffffff") -> None:
+    def __init__(
+        self,
+        parent: tk.Widget,
+        command,
+        *,
+        image: tk.PhotoImage | None = None,
+        size: int = 42,
+        background: str = "#ffffff",
+    ) -> None:
         super().__init__(
             parent,
             width=size,
@@ -348,6 +358,7 @@ class WebSearchToggleButton(tk.Canvas):
             takefocus=True,
         )
         self.command = command
+        self.image = image
         self.size = size
         self.active = False
         self.hover = False
@@ -385,11 +396,15 @@ class WebSearchToggleButton(tk.Canvas):
         outline = "#1a73e8" if self.active else ("#8ea2b5" if self.hover else "#cfd4da")
         icon = "#1a73e8" if self.active else "#384655"
         self.create_rectangle(0, 0, size, size, fill=bg, outline="")
-        self.create_oval(7, 7, size - 7, size - 7, outline=outline, width=2)
-        self.create_arc(10, 7, size - 10, size - 7, start=90, extent=180, outline=icon, width=1)
-        self.create_arc(10, 7, size - 10, size - 7, start=270, extent=180, outline=icon, width=1)
-        self.create_line(7, size // 2, size - 7, size // 2, fill=icon, width=1)
-        self.create_line(size // 2, 8, size // 2, size - 8, fill=icon, width=1)
+        self.create_rectangle(1, 1, size - 1, size - 1, outline=outline if self.active or self.hover else "#ffffff", width=1)
+        if self.image:
+            self.create_image(size // 2, size // 2, image=self.image)
+        else:
+            self.create_oval(7, 7, size - 7, size - 7, outline=outline, width=2)
+            self.create_arc(10, 7, size - 10, size - 7, start=90, extent=180, outline=icon, width=1)
+            self.create_arc(10, 7, size - 10, size - 7, start=270, extent=180, outline=icon, width=1)
+            self.create_line(7, size // 2, size - 7, size // 2, fill=icon, width=1)
+            self.create_line(size // 2, 8, size // 2, size - 8, fill=icon, width=1)
         if self.active:
             self.create_oval(size - 12, 8, size - 6, 14, fill="#34a853", outline="")
 
@@ -684,6 +699,120 @@ def fetch_article_markdown(url: str, *, timeout: int = 15, limit_bytes: int = 2_
     return title, markdown[:60000]
 
 
+class DuckDuckGoResultParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict[str, str]] = []
+        self.current: dict[str, str] | None = None
+        self.capture_title = False
+        self.capture_snippet = False
+        self.title_parts: list[str] = []
+        self.snippet_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        attrs_dict = {name: value or "" for name, value in attrs}
+        classes = attrs_dict.get("class", "")
+        if tag == "a" and ("result__a" in classes or "result-link" in classes):
+            self.flush()
+            self.current = {"url": normalize_search_url(attrs_dict.get("href", "")), "title": "", "snippet": ""}
+            self.title_parts = []
+            self.capture_title = True
+        elif self.current is not None and ("result__snippet" in classes or "result-snippet" in classes):
+            self.snippet_parts = []
+            self.capture_snippet = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self.capture_title:
+            self.capture_title = False
+            if self.current is not None:
+                self.current["title"] = compact_whitespace(" ".join(self.title_parts))
+        elif self.capture_snippet and tag in {"a", "div", "td"}:
+            self.capture_snippet = False
+            if self.current is not None:
+                self.current["snippet"] = compact_whitespace(" ".join(self.snippet_parts))
+
+    def handle_data(self, data: str) -> None:
+        text = compact_whitespace(data)
+        if not text:
+            return
+        if self.capture_title:
+            self.title_parts.append(text)
+        elif self.capture_snippet:
+            self.snippet_parts.append(text)
+
+    def flush(self) -> None:
+        if self.current and self.current.get("title"):
+            self.results.append(self.current)
+        self.current = None
+
+    def close(self) -> None:
+        self.flush()
+        super().close()
+
+
+def normalize_search_url(url: str) -> str:
+    url = (url or "").strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+    if "uddg" in params and params["uddg"]:
+        return unquote(params["uddg"][0])
+    return url
+
+
+def fetch_web_search_results(query: str, *, max_results: int = 5, timeout: int = 12) -> list[dict[str, str]]:
+    search_urls = [
+        "https://duckduckgo.com/html/?" + urlencode({"q": query}),
+        "https://lite.duckduckgo.com/lite/?" + urlencode({"q": query}),
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 KnowledgeLab/1.0 (+local web context)",
+        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.2",
+    }
+    for search_url in search_urls:
+        request = urllib.request.Request(search_url, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                html = response.read(1_200_000).decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        parser = DuckDuckGoResultParser()
+        parser.feed(html)
+        parser.close()
+        unique: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for result in parser.results:
+            url = result.get("url", "")
+            title = result.get("title", "")
+            if not url or not title or url in seen:
+                continue
+            seen.add(url)
+            unique.append(result)
+            if len(unique) >= max_results:
+                break
+        if unique:
+            return unique
+    return []
+
+
+def render_web_search_context(query: str, results: list[dict[str, str]]) -> str:
+    lines = [
+        "Web search context for the next answer.",
+        "Use this external web context only when it is relevant. Cite URLs when relying on it.",
+        f"Search query: {query}",
+        "",
+    ]
+    for index, result in enumerate(results, 1):
+        lines.append(f"[{index}] {result.get('title', '').strip()}")
+        lines.append(f"URL: {result.get('url', '').strip()}")
+        snippet = result.get("snippet", "").strip()
+        if snippet:
+            lines.append(f"Snippet: {snippet}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def is_knowledge_lookup_text(text: str) -> bool:
     compact = compact_text(text)
     return any(term in compact for term in KNOWLEDGE_LOOKUP_TERMS)
@@ -787,8 +916,12 @@ class KnowledgeChatApp:
         self.settings_window: tk.Toplevel | None = None
         self.settings_status_var = tk.StringVar(value="")
         self.tooltips: list[ToolTip] = []
+        self.icon_images: list[tk.PhotoImage] = []
         self.obsidian_raw_image: tk.PhotoImage | None = None
         self.obsidian_image: tk.PhotoImage | None = None
+        self.new_chat_image: tk.PhotoImage | None = None
+        self.web_search_image: tk.PhotoImage | None = None
+        self.rename_chat_image: tk.PhotoImage | None = None
         self.chat_widgets: list[tk.Widget] = []
         self.chat_row_widgets: list[tk.Widget] = []
         self.input_history: list[str] = []
@@ -1155,8 +1288,12 @@ class KnowledgeChatApp:
             title_label.grid(row=0, column=0, sticky="ew")
             age = tk.Label(row, text=self.format_chat_age(str(chat.get("updated_at", ""))), bg=row_bg, fg="#7a838c", font=("Segoe UI", 8))
             age.grid(row=0, column=1, sticky="e", padx=(6, 4))
-            rename = tk.Button(row, text="✎", width=2, relief="flat", bg=row_bg, activebackground="#d4dde6", command=lambda cid=chat_id: self.rename_chat_by_id(cid))
+            if self.rename_chat_image:
+                rename = IconButton(row, self.rename_chat_image, lambda cid=chat_id: self.rename_chat_by_id(cid), size=24, background=row_bg)
+            else:
+                rename = tk.Button(row, text="✎", width=2, relief="flat", bg=row_bg, activebackground="#d4dde6", command=lambda cid=chat_id: self.rename_chat_by_id(cid))
             rename.grid(row=0, column=2, sticky="e", padx=(2, 0))
+            self.add_tooltip(rename, "Переименовать чат.")
             delete = tk.Button(row, text="×", width=2, relief="flat", bg=row_bg, activebackground="#d4dde6", command=lambda cid=chat_id: self.delete_chat_by_id(cid))
             delete.grid(row=0, column=3, sticky="e", padx=(2, 0))
             for child in (row, title_label, age):
@@ -1179,6 +1316,9 @@ class KnowledgeChatApp:
     def build_ui(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
+        self.new_chat_image = self.load_icon_image(NEW_CHAT_ICON, 22)
+        self.web_search_image = self.load_icon_image(WEB_SEARCH_ICON, 26)
+        self.rename_chat_image = self.load_icon_image(RENAME_CHAT_ICON, 18)
 
         toolbar = ttk.Frame(self.root, padding=(14, 10), style="Top.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew")
@@ -1227,7 +1367,12 @@ class KnowledgeChatApp:
         sidebar_header.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 8))
         sidebar_header.columnconfigure(0, weight=1)
         tk.Label(sidebar_header, text="История", bg="#eef2f5", fg="#1f2933", font=("Segoe UI Semibold", 11), anchor="w").grid(row=0, column=0, sticky="ew")
-        tk.Button(sidebar_header, text="+", width=3, relief="flat", bg="#eef2f5", activebackground="#dfe6ed", command=self.create_chat).grid(row=0, column=1, sticky="e")
+        if self.new_chat_image:
+            self.new_chat_button = IconButton(sidebar_header, self.new_chat_image, self.create_chat, size=30, background="#eef2f5")
+        else:
+            self.new_chat_button = tk.Button(sidebar_header, text="+", width=3, relief="flat", bg="#eef2f5", activebackground="#dfe6ed", command=self.create_chat)
+        self.new_chat_button.grid(row=0, column=1, sticky="e")
+        self.add_tooltip(self.new_chat_button, "Новый чат.")
 
         self.chat_rows_canvas = tk.Canvas(sidebar, bg="#eef2f5", borderwidth=0, highlightthickness=0)
         self.chat_rows_canvas.grid(row=1, column=0, sticky="nsew", padx=(0, 2))
@@ -1294,9 +1439,9 @@ class KnowledgeChatApp:
             font=("Segoe UI", 10),
         )
         self.input.grid(row=0, column=0, sticky="ew")
-        self.web_search_button = WebSearchToggleButton(input_shell, self.toggle_web_search, size=42, background="#ffffff")
+        self.web_search_button = WebSearchToggleButton(input_shell, self.toggle_web_search, image=self.web_search_image, size=42, background="#ffffff")
         self.web_search_button.grid(row=0, column=1, sticky="ns")
-        self.add_tooltip(self.web_search_button, "Включить/выключить web-поиск для следующих сообщений.")
+        self.add_tooltip(self.web_search_button, "Включить/выключить web-поиск для LLM.")
         self.input.bind("<Control-Return>", self.on_ctrl_return)
         self.input.bind("<Shift-Return>", self.on_shift_return)
         self.input.bind("<Return>", self.on_return)
@@ -1322,6 +1467,18 @@ class KnowledgeChatApp:
 
     def add_tooltip(self, widget: tk.Widget, text: str) -> None:
         self.tooltips.append(ToolTip(widget, text))
+
+    def load_icon_image(self, path: Path, target_px: int) -> tk.PhotoImage | None:
+        if not path.exists():
+            return None
+        try:
+            raw = tk.PhotoImage(file=str(path))
+            factor = max(1, int(round(max(raw.width(), raw.height()) / max(1, target_px))))
+            image = raw.subsample(factor, factor)
+            self.icon_images.extend([raw, image])
+            return image
+        except tk.TclError:
+            return None
 
     def apply_settings_to_ui(self) -> None:
         self.enter_send_var.set(bool(self.settings["send_on_enter"]))
@@ -1654,10 +1811,20 @@ class KnowledgeChatApp:
                 return "", "Модель рассуждала, но не вернула финальный текст. В LM Studio отключите thinking/reasoning для этой модели или попробуйте другой instruct-моделью."
         return "", "Модель вернула пустой ответ."
 
-    def run_plain_query(self, operation_id: int, question: str, pending_warnings: list[str]) -> None:
+    def run_plain_query(
+        self,
+        operation_id: int,
+        question: str,
+        pending_warnings: list[str],
+        web_search_enabled: bool = False,
+        web_query: str = "",
+    ) -> None:
+        warnings = list(pending_warnings)
         try:
+            if web_search_enabled:
+                question, web_warnings = self.prepare_web_prompt(web_query or question, question)
+                warnings.extend(web_warnings)
             output, model_warning = self.call_plain_lmstudio(question)
-            warnings = list(pending_warnings)
             if model_warning:
                 warnings.append(model_warning)
             if not output:
@@ -1668,7 +1835,6 @@ class KnowledgeChatApp:
         except Exception:
             output = "Не удалось подключиться к LM Studio во время ответа. Откройте LightRAG-Control для проверки сервера и модели."
             tag = "error"
-            warnings = pending_warnings
         self.root.after(0, self.finish_query, operation_id, output, tag, warnings, False)
 
     def render_current_chat(self) -> None:
@@ -1894,18 +2060,24 @@ class KnowledgeChatApp:
         self.update_web_search_button()
         self.status_var.set("Web search on" if enabled else "Web search off")
         self.append_warning_message(
-            "Web-поиск включен. Следующее обычное сообщение откроет поиск по теме." if enabled else "Web-поиск выключен.",
+            "Web-поиск включен. Следующие обычные сообщения получат web-контекст для LLM." if enabled else "Web-поиск выключен.",
             persist=False,
         )
 
-    def open_web_search_for_query(self, query: str, *, persist: bool = False) -> None:
-        query = query.strip()
-        if not query:
-            self.append_warning_message("Введите тему или вопрос, затем нажмите веб-поиск.", persist=False)
-            return
-        url = f"https://www.google.com/search?q={quote_plus(query)}"
-        webbrowser.open(url)
-        self.append_warning_message(f"Открыл web-поиск по теме: {query[:120]}", persist=persist)
+    def prepare_web_prompt(self, question: str, prompt: str) -> tuple[str, list[str]]:
+        try:
+            results = fetch_web_search_results(question)
+        except Exception as exc:
+            return prompt, [f"Web-поиск не сработал: {exc}. Ответ создан без web-контекста."]
+        if not results:
+            return prompt, ["Web-поиск не нашел результатов. Ответ создан без web-контекста."]
+        web_context = render_web_search_context(question, results)
+        enhanced = (
+            f"{web_context}\n\n"
+            "Answer the user in Russian. If web results are insufficient, say that clearly.\n\n"
+            f"User question:\n{prompt}"
+        )
+        return enhanced, [f"Web-поиск использован: {len(results)} результатов передано LLM."]
 
     def load_input_history(self) -> None:
         questions: list[str] = []
@@ -2192,10 +2364,8 @@ class KnowledgeChatApp:
                 self.append_assistant_message(f"Не удалось сохранить заметку: {exc}\nОткройте LightRAG-Control для диагностики.", "error")
             return
 
-        if bool(self.settings.get("web_search_enabled", False)):
-            self.open_web_search_for_query(question, persist=False)
-
         use_lightrag = bool(self.lightrag_var.get()) or explicit_knowledge_lookup
+        web_search_enabled = bool(self.settings.get("web_search_enabled", False))
         warnings: list[str] = []
         lm_ready, lm_message, _models = self.check_lmstudio_ready(require_models=True)
         if not lm_ready:
@@ -2222,7 +2392,24 @@ class KnowledgeChatApp:
                 "а затем помоги по сути вопроса насколько возможно.\n\n"
                 f"{prompt}"
             )
-        args = (operation_id, question, prompt, context_name, scope, project, use_lightrag, warnings) if use_lightrag else (operation_id, plain_prompt, warnings)
+        args = (
+            operation_id,
+            question,
+            prompt,
+            context_name,
+            scope,
+            project,
+            use_lightrag,
+            warnings,
+            web_search_enabled,
+            question,
+        ) if use_lightrag else (
+            operation_id,
+            plain_prompt,
+            warnings,
+            web_search_enabled,
+            question,
+        )
         thread = threading.Thread(target=target, args=args, daemon=True)
         thread.start()
 
@@ -2274,8 +2461,13 @@ class KnowledgeChatApp:
         project: str,
         use_lightrag: bool,
         pending_warnings: list[str],
+        web_search_enabled: bool = False,
+        web_query: str = "",
     ) -> None:
         lightrag_used_actual = False
+        if web_search_enabled:
+            question, web_warnings = self.prepare_web_prompt(web_query or raw_question, question)
+            pending_warnings = pending_warnings + web_warnings
         command_base = [
             "powershell",
             "-NoProfile",
@@ -2310,7 +2502,8 @@ class KnowledgeChatApp:
             warnings = pending_warnings + warnings
             if returncode != 0:
                 rag_error = self.friendly_error(output)
-                fallback, model_warning = self.call_plain_lmstudio(raw_question)
+                fallback_question = question if web_search_enabled else raw_question
+                fallback, model_warning = self.call_plain_lmstudio(fallback_question)
                 if fallback:
                     output = fallback
                     tag = "assistant"
@@ -2324,7 +2517,8 @@ class KnowledgeChatApp:
                 tag = "assistant"
                 lightrag_used_actual = True
             if not output:
-                fallback, model_warning = self.call_plain_lmstudio(raw_question)
+                fallback_question = question if web_search_enabled else raw_question
+                fallback, model_warning = self.call_plain_lmstudio(fallback_question)
                 if fallback:
                     output = fallback
                     tag = "assistant"

@@ -151,8 +151,8 @@ sequenceDiagram
 - If LightRAG is enabled but the selected index is missing, LightRAG turns off, the answer uses plain LM Studio, and the user sees a gray note.
 - `Enter` sends by default; `Shift+Enter` adds a newline. This is configurable.
 - Big maintenance buttons stay out of the chat. Reindexing and deeper checks belong in LightRAG-Control.
-- Web search is a small input-side toggle: when enabled, normal messages open a browser search for the current text without replacing normal chat.
-- LightRAG is local-only. It can use web content only after the page/video/source is saved, parsed/transcribed, and indexed into the local vault.
+- Web search is a small input-side toggle: when enabled, the chat fetches search snippets and passes them into the LLM as temporary context without opening a browser for the user.
+- LightRAG is local-only. It does not crawl or search the web by itself; it can use web content only after the page/video/source is saved, parsed/transcribed, and indexed into the local vault.
 - Obsidian opens through the right-edge icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.
 - Game Guard does not run at Windows startup by default. It samples GPU load a few seconds after the chat opens and warns only on sustained load.
 - The installer removes legacy Game Guard startup shortcuts left by older builds.
