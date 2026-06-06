@@ -154,4 +154,9 @@ def require_usable_context(result: dict[str, Any]) -> None:
 def llm_content(result: dict[str, Any]) -> str:
     response = result.get("llm_response") or {}
     content = response.get("content")
-    return content.strip() if isinstance(content, str) else ""
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    reasoning = response.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return ""
+    return ""

@@ -41,6 +41,29 @@ function Test-GuiOutput {
     return ($env:LMSTUDIO_GUI_OUTPUT -match "^(1|true|yes|on)$")
 }
 
+function Test-LmStudioApiReady {
+    param([bool] $RequireEmbedding)
+
+    $baseUrl = $env:LMSTUDIO_BASE_URL
+    if (-not $baseUrl) { $baseUrl = "http://127.0.0.1:1234/v1" }
+    $baseUrl = $baseUrl.TrimEnd("/")
+    $llm = $env:LMSTUDIO_LLM_MODEL
+    if (-not $llm) { $llm = "qwen/qwen3-14b" }
+    $embedding = $env:LMSTUDIO_EMBEDDING_MODEL
+    if (-not $embedding) { $embedding = "nomic-embed" }
+
+    try {
+        $models = Invoke-RestMethod -Uri "$baseUrl/models" -TimeoutSec 3
+        $ids = @($models.data | ForEach-Object { $_.id })
+        if ($ids -notcontains $llm) { return $false }
+        if ($RequireEmbedding -and ($ids -notcontains $embedding)) { return $false }
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
 function Test-AutoIndexRunning {
     param([string] $PidPath)
     if (-not (Test-Path -LiteralPath $PidPath)) {
@@ -129,24 +152,28 @@ if (Test-GuiOutput) {
     New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
     $startupLog = Join-Path $tmpDir ("startup-gui-{0}.log" -f ([Guid]::NewGuid().ToString("N")))
     $oldErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = "Continue"
-        & $StartScript *> $startupLog
-        $startupExitCode = $LASTEXITCODE
-    }
-    catch {
-        $startupOutput += $_
-        $startupExitCode = 1
-    }
-    finally {
-        $ErrorActionPreference = $oldErrorActionPreference
-        if ($startupExitCode -eq 0) {
-            Remove-Item -LiteralPath $startupLog -Force -ErrorAction SilentlyContinue
+    if (-not (Test-LmStudioApiReady -RequireEmbedding:$UseLightRag)) {
+        try {
+            $ErrorActionPreference = "Continue"
+            & $StartScript *> $startupLog
+            $startupExitCode = $LASTEXITCODE
         }
-    }
-    if ($startupExitCode -ne 0) {
-        Write-KnowledgeWarning "Не удалось подготовить LM Studio. Проверь, что LM Studio запущен и доступен на http://127.0.0.1:1234."
-        exit $startupExitCode
+        catch {
+            $startupOutput += $_
+            $startupExitCode = 1
+        }
+        finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+            if ($startupExitCode -eq 0) {
+                Remove-Item -LiteralPath $startupLog -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ($startupExitCode -ne 0) {
+            Write-KnowledgeWarning "Не удалось подготовить LM Studio. Проверь, что LM Studio запущен и доступен на http://127.0.0.1:1234."
+            exit $startupExitCode
+        }
+    } else {
+        Remove-Item -LiteralPath $startupLog -Force -ErrorAction SilentlyContinue
     }
 } else {
     & $StartScript

@@ -93,6 +93,17 @@ def emit_warning(message: str) -> None:
         print(f"Note: {message}", file=sys.stderr)
 
 
+def chat_message_content(response) -> str:
+    message = response.choices[0].message
+    content = getattr(message, "content", None)
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    reasoning = getattr(message, "reasoning_content", None)
+    if isinstance(reasoning, str) and reasoning.strip():
+        return ""
+    return ""
+
+
 async def plain_lmstudio_answer(question: str) -> str:
     client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
     response = await client.chat.completions.create(
@@ -107,13 +118,13 @@ async def plain_lmstudio_answer(question: str) -> str:
                     "If the user asks for code, writing, translation, brainstorming, or casual conversation, help with that task."
                 ),
             },
-            {"role": "user", "content": f"{question}\n\n/no_think"},
+            {"role": "user", "content": f"/no_think\n\n{question}"},
         ],
         temperature=0.2,
         max_tokens=LLM_MAX_RESPONSE_TOKENS,
         stream=False,
     )
-    return (response.choices[0].message.content or "").strip()
+    return chat_message_content(response)
 
 
 async def main() -> None:
@@ -140,7 +151,7 @@ async def main() -> None:
             "temperature": 0.2,
             "max_tokens": LLM_MAX_RESPONSE_TOKENS,
             "stream": False,
-            "enable_cot": True,
+            "enable_cot": False,
         },
         embedding_func=embedding_func,
         tokenizer=LOCAL_TOKENIZER,

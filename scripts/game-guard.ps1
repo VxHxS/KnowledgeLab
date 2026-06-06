@@ -174,24 +174,9 @@ function Get-StartupShortcutPath {
 }
 
 function Install-GameGuardStartup {
-    $shortcutPath = Get-StartupShortcutPath
-    $powershell = (Get-Command "powershell.exe" -ErrorAction SilentlyContinue).Source
-    if (-not $powershell) { $powershell = "powershell.exe" }
-
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($shortcutPath)
-    $shortcut.TargetPath = $powershell
-    $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$ScriptPath`" -Watch -IntervalSeconds $IntervalSeconds"
-    $shortcut.WorkingDirectory = $Root
-    $icon = Join-Path $Root "assets\icons\LightRAG-Control.ico"
-    if (Test-Path -LiteralPath $icon) {
-        $shortcut.IconLocation = "$icon,0"
-    }
-    $shortcut.Save()
-
-    Write-Host "Game Guard startup shortcut installed:"
-    Write-Host $shortcutPath
-    Write-GuardLog "startup installed: $shortcutPath"
+    Write-Host "Game Guard startup is disabled in KnowledgeLab 007."
+    Write-Host "GPU checks now run from LightRAG-Chat after the chat opens, not when Windows starts."
+    Uninstall-GameGuardStartup
 }
 
 function Uninstall-GameGuardStartup {
@@ -341,5 +326,4 @@ Write-Host ""
 Write-Host "Usage:"
 Write-Host "  scripts\game-guard.ps1 -Once"
 Write-Host "  scripts\game-guard.ps1 -Watch"
-Write-Host "  scripts\game-guard.ps1 -InstallStartup -StartNow"
 Write-Host "  scripts\game-guard.ps1 -UninstallStartup -StopNow"

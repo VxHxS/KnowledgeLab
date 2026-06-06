@@ -14,7 +14,9 @@ from vault_sources import collect_markdown_documents
 
 
 ROOT = Path(__file__).resolve().parents[1]
-VAULT_DIR = ROOT / "Obsidian-Test-Vault"
+VAULT_DIR = Path(os.getenv("KNOWLEDGELAB_VAULT_DIR", str(ROOT / "Obsidian-Test-Vault")))
+if not VAULT_DIR.is_absolute():
+    VAULT_DIR = ROOT / VAULT_DIR
 DEFAULT_WORKING_DIR = ROOT / "LightRAG" / "rag_storage_lmstudio"
 WORKING_DIR = Path(os.getenv("LMSTUDIO_RAG_DIR", str(DEFAULT_WORKING_DIR)))
 if not WORKING_DIR.is_absolute():
@@ -81,7 +83,7 @@ async def main() -> None:
             "temperature": 0.2,
             "max_tokens": 2048,
             "stream": False,
-            "enable_cot": True,
+            "enable_cot": False,
         },
         embedding_func=embedding_func,
         tokenizer=LOCAL_TOKENIZER,

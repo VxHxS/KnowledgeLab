@@ -44,11 +44,12 @@ flowchart TD
     User["User"]
     Chat["LightRAG Chat<br/>scripts/knowledge_chat_gui.py"]
     Store["Conversation Store<br/>tmp/knowledge-chat-sessions.json"]
-    Settings["Settings<br/>Enter, LightRAG, colors, Obsidian, Game Guard"]
+    Settings["Settings<br/>Enter, LightRAG, colors, Obsidian, vault, Game Guard"]
     Router["Intent Router<br/>plain chat / RAG / save / diagnostics"]
     Save["Obsidian Capture<br/>Markdown notes"]
     Health["Health Hints<br/>LM Studio, LightRAG index, Obsidian path"]
     Guard["GPU Game Guard<br/>delayed warning after chat opens"]
+    DirectLM["Direct LM Studio Adapter<br/>/v1/models + /v1/chat/completions"]
     QueryPS["Scoped PowerShell Query<br/>query-vault-scope-lmstudio.ps1"]
     QueryPY["LLM/RAG Adapter<br/>query-vault-lmstudio.py"]
     LightRAG["LightRAG Storage<br/>rag_storage_general/web/game"]
@@ -63,6 +64,9 @@ flowchart TD
     Chat --> Router
     Router --> Save
     Save --> Vault
+    Router --> DirectLM
+    DirectLM --> LMStudio
+    DirectLM --> Answer
     Router --> QueryPS
     QueryPS --> QueryPY
     QueryPY --> LMStudio
@@ -83,7 +87,8 @@ sequenceDiagram
     participant U as User
     participant GUI as LightRAG Chat
     participant R as Intent Router
-    participant Q as Query Layer
+    participant A as Direct Adapter
+    participant Q as RAG Query Layer
     participant L as LM Studio
     participant G as LightRAG
     participant O as Obsidian
@@ -101,8 +106,8 @@ sequenceDiagram
         Q->>L: Ask with context
         L-->>GUI: Answer with references/context
     else LightRAG off or unavailable
-        R->>Q: Ask plain LM Studio
-        Q->>L: Direct LLM request
+        R->>A: Ask plain LM Studio
+        A->>L: Direct LLM request
         L-->>GUI: Normal answer
         GUI-->>U: Gray note that LightRAG was not used
     end
@@ -112,9 +117,10 @@ sequenceDiagram
 
 | Component | Role |
 | --- | --- |
-| Chat UI | Messenger-style Tkinter app with left chat history, rename/delete, settings, Obsidian icon, cancel and timeout protection |
+| Chat UI | Messenger-style Tkinter app with left chat history, row-level rename/delete, settings, full-icon Obsidian button, cancel and timeout protection |
 | Conversation Store | Local JSON sessions with messages, warnings, timestamps, and current chat |
 | Intent Router | Treats all input as normal chat first, then activates save/RAG/diagnostic capabilities when appropriate |
+| Direct LM Studio Adapter | Checks `/v1/models`, validates loaded model IDs, and sends plain chat directly to `/v1/chat/completions` |
 | LightRAG Adapter | Uses indexed storage only when LightRAG is enabled in Settings and storage exists |
 | Obsidian Capture | Saves URLs and notes from phrases like `вот ссылка`, `сохрани`, `добавь в базу` |
 | Health Hints | Converts system failures into readable guidance and suggests LightRAG-Control |
@@ -133,11 +139,13 @@ sequenceDiagram
 ## Behavior Rules
 
 - Default chat mode is plain LM Studio. LightRAG is off until enabled in Settings.
+- Plain chat does not call the PowerShell RAG wrapper; it uses the LM Studio OpenAI-compatible API directly.
 - If LightRAG is enabled but the selected index is missing, LightRAG turns off, the answer uses plain LM Studio, and the user sees a gray note.
 - `Enter` sends by default; `Shift+Enter` adds a newline. This is configurable.
 - Big maintenance buttons stay out of the chat. Reindexing and deeper checks belong in LightRAG-Control.
 - Obsidian opens through the small icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.
 - Game Guard does not run at Windows startup by default. It samples GPU load a few seconds after the chat opens and warns only on sustained load.
+- The installer removes legacy Game Guard startup shortcuts left by older builds.
 - Startup blocking by the old process-name Game Guard is opt-in through `KNOWLEDGELAB_STARTUP_GAME_GUARD=1`.
 
 ## Diagnostics

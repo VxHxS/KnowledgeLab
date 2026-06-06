@@ -16,11 +16,27 @@ $env:PYTHONUTF8 = "1"
 $env:LMSTUDIO_SCOPE = $Scope
 $env:LMSTUDIO_PROJECT = if ($Scope -in @("game", "web")) { $Project } else { "" }
 $env:LMSTUDIO_RAG_DIR = "LightRAG\rag_storage_$StorageName"
+$ConfiguredVaultDir = ""
+
+$SettingsPath = Join-Path $Root "tmp\knowledge-chat-settings.json"
+try {
+    if (Test-Path -LiteralPath $SettingsPath) {
+        $settings = Get-Content -LiteralPath $SettingsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ($settings.vault_path) {
+            $ConfiguredVaultDir = [string] $settings.vault_path
+            $env:KNOWLEDGELAB_VAULT_DIR = $ConfiguredVaultDir
+        }
+    }
+}
+catch {}
 
 if ($env:LIGHTRAG_SYNC_YOUTUBE_LINKS -ne "0") {
     $SyncArgs = @("--scope", $Scope)
     if ($Scope -in @("game", "web") -and $Project) {
         $SyncArgs += @("--project", $Project)
+    }
+    if ($ConfiguredVaultDir) {
+        $SyncArgs += @("--vault-dir", $ConfiguredVaultDir)
     }
     & $Python (Join-Path $PSScriptRoot "sync-youtube-links.py") @SyncArgs
     if ($LASTEXITCODE -ne 0) {

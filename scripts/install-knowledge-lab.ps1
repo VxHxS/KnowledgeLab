@@ -355,7 +355,21 @@ function Ensure-EnvFile {
     $envFile = Join-Path $Root "LightRAG\.env"
     $example = Join-Path $Root "LightRAG\.env.lmstudio.example"
     if (Test-Path -LiteralPath $envFile) {
-        Add-Check "LightRAG .env" "OK" $envFile
+        $content = Get-Content -LiteralPath $envFile -Raw -ErrorAction SilentlyContinue
+        if ($content -match "LLM_BINDING=openai" -and $content -match "LLM_MODEL=qwen/qwen3-14b" -and $content -match "EMBEDDING_MODEL=nomic-embed") {
+            Add-Check "LightRAG .env" "OK" $envFile
+            return
+        }
+        if (Test-Path -LiteralPath $example) {
+            $backup = "$envFile.backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+            Add-Check "LightRAG .env" "UPDATE" "Replacing non-LM Studio .env; backup: $backup"
+            if (-not $DryRun) {
+                Copy-Item -LiteralPath $envFile -Destination $backup -Force
+                Copy-Item -LiteralPath $example -Destination $envFile -Force
+            }
+        } else {
+            Add-Check "LightRAG .env" "CHECK" "Existing .env is not LM Studio format and no example file was found."
+        }
         return
     }
     if (Test-Path -LiteralPath $example) {
@@ -419,6 +433,92 @@ function Test-ExternalTools {
         Add-Check "FFmpeg" "OK" $ffmpeg
     } else {
         Add-Check "FFmpeg" "OPTIONAL" "Needed later for audio transcription fallback when YouTube captions are absent."
+    }
+}
+
+function Remove-LegacyStartupEntries {
+    $startup = [Environment]::GetFolderPath("Startup")
+    $removed = New-Object System.Collections.Generic.List[string]
+    if ($startup) {
+        foreach ($name in @("KnowledgeLab Game Guard.lnk", "LightRAG Game Guard.lnk")) {
+            $path = Join-Path $startup $name
+            if (Test-Path -LiteralPath $path) {
+                if (-not $DryRun) {
+                    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+                }
+                $removed.Add($path) | Out-Null
+            }
+        }
+    }
+
+    $guardPidPath = Join-Path $Root "tmp\game-guard.pid"
+    if (Test-Path -LiteralPath $guardPidPath) {
+        try {
+            $pidText = (Get-Content -LiteralPath $guardPidPath -ErrorAction Stop | Select-Object -First 1).Trim()
+            if ($pidText) {
+                $process = Get-Process -Id ([int] $pidText) -ErrorAction SilentlyContinue
+                if ($process -and -not $DryRun) {
+                    Stop-Process -Id ([int] $pidText) -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if (-not $DryRun) {
+                Remove-Item -LiteralPath $guardPidPath -Force -ErrorAction SilentlyContinue
+            }
+            $removed.Add($guardPidPath) | Out-Null
+        }
+        catch {}
+    }
+
+    if ($removed.Count -gt 0) {
+        $status = if ($DryRun) { "WOULD_REMOVE" } else { "REMOVED" }
+        Add-Check "Legacy Game Guard startup" $status ($removed -join "; ")
+    } else {
+        Add-Check "Legacy Game Guard startup" "OK" "No Windows startup item detected."
+    }
+}
+
+function Ensure-ChatSettings {
+    $settingsPath = Join-Path $Root "tmp\knowledge-chat-settings.json"
+    $vaultPath = Join-Path $Root "Obsidian-Test-Vault"
+    $settings = [ordered]@{
+        send_on_enter = $true
+        use_lightrag = $false
+        button_color = "#3d5f88"
+        game_guard_enabled = $true
+        game_guard_delay_seconds = 5
+        obsidian_path = ""
+        vault_path = $vaultPath
+        lmstudio_base_url = "http://127.0.0.1:1234/v1"
+        llm_model = "qwen/qwen3-14b"
+        embedding_model = "nomic-embed"
+        default_llm_mode_applied = $true
+        main_toolbar_lightrag_removed = $true
+        plain_chat_adapter_version = 1
+    }
+
+    if (Test-Path -LiteralPath $settingsPath) {
+        try {
+            $existing = Get-Content -LiteralPath $settingsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            foreach ($property in $existing.PSObject.Properties) {
+                if ($settings.Contains($property.Name)) {
+                    $settings[$property.Name] = $property.Value
+                }
+            }
+            $settings["use_lightrag"] = $false
+            $settings["vault_path"] = $vaultPath
+            $settings["lmstudio_base_url"] = "http://127.0.0.1:1234/v1"
+            $settings["llm_model"] = "qwen/qwen3-14b"
+            $settings["embedding_model"] = "nomic-embed"
+            $settings["main_toolbar_lightrag_removed"] = $true
+            $settings["plain_chat_adapter_version"] = 1
+        }
+        catch {}
+    }
+
+    Add-Check "Chat settings" "WRITE" "$settingsPath (plain LM Studio by default, LightRAG off)"
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $settingsPath) | Out-Null
+        $settings | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $settingsPath -Encoding UTF8
     }
 }
 
@@ -525,6 +625,7 @@ function Write-InstallReport {
     $lines.Add("- Install LM Studio manually if it is missing, then download/load the configured LLM and embedding models.") | Out-Null
     $lines.Add("- Install Obsidian manually if you want the Obsidian icon to open the app directly. If it is not detected, the chat can ask for Obsidian.exe.") | Out-Null
     $lines.Add("- Use LightRAG-Control when LM Studio, models, indexes, imports, or GPU/Game Guard diagnostics need attention.") | Out-Null
+    $lines.Add("- Game Guard is not installed into Windows startup. LightRAG-Chat runs the delayed GPU-load check only while the chat is open.") | Out-Null
     $lines.Add("") | Out-Null
     $lines.Add("## Main launchers") | Out-Null
     $lines.Add("") | Out-Null
@@ -567,6 +668,8 @@ Test-PythonImports
 Test-LightRAGPackage
 Ensure-EnvFile
 Test-ExternalTools
+Remove-LegacyStartupEntries
+Ensure-ChatSettings
 Install-DesktopLaunchers
 
 $report = Write-InstallReport $profile
