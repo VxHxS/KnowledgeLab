@@ -12,8 +12,8 @@ KnowledgeLab is a local-first Windows knowledge system that combines LM Studio, 
 - Saves links and notes from the chat into Obsidian when the user says things like `вот ссылка`, `сохрани`, or `добавь в базу`.
 - Parses saved web pages into Markdown when possible.
 - Sends saved YouTube links through transcript sync and starts LightRAG refresh in the background.
-- Saves attached images as lightweight Markdown intake notes with source path, topic guess, and pending OCR/vision extraction status.
-- Provides a web-search toggle near the input. When enabled, the chat fetches web-search snippets and gives them to the LLM as temporary context.
+- Saves attached files as lightweight Markdown intake notes with source path, topic guess, metadata, immediate text/DOCX extraction when possible, and pending OCR/ASR/document-processing status for heavier sources.
+- Provides web-search, file-attach, and voice-input controls in the lower-left of the input composer. Web search fetches snippets and gives them to the LLM as temporary context.
 - Keeps LightRAG local-only. LightRAG can use web data only after a page, video, or source is saved into the vault and indexed.
 - Keeps chat sessions locally with a grouped left-side history panel, rename, and delete.
 - Provides settings for Enter-to-send, LightRAG, button color, Obsidian path, vault path, and Game Guard.
@@ -86,7 +86,8 @@ Default behavior:
 - Simple status questions such as `lightrag подключен?` are answered by the app status layer, not by retrieval.
 - If LightRAG is enabled in Settings but the index is missing, LightRAG turns off and the answer continues through plain LM Studio.
 - The left column stores local chat sessions grouped by project/topic.
-- The web-search icon near the input toggles web context mode. When it is on, normal messages fetch search snippets and pass them into the LLM prompt; the browser is not opened for the user.
+- The web-search icon in the lower-left of the input composer toggles web context mode. When it is on, normal messages fetch search snippets and pass them into the LLM prompt; the browser is not opened for the user.
+- The paperclip button saves images, text files, DOCX/PDF documents, audio, video, or other files into Markdown intake notes. The microphone button tries Windows Speech Recognition and inserts recognized text into the input field.
 - LightRAG itself does not search the web. It retrieves from local indexed storage. Web material becomes LightRAG knowledge only after the material pipeline saves and indexes it.
 - The Obsidian icon opens the Obsidian app; if it is not found, the user can choose `Obsidian.exe` or open the Obsidian website.
 - Maintenance actions such as reindexing are handled in `LightRAG-Control`, not as large buttons in the chat.
@@ -98,9 +99,9 @@ KnowledgeLab should keep permanent storage lightweight:
 
 - Web pages are saved as Markdown notes and parsed text when possible.
 - YouTube links are stored as link notes, then converted into transcript Markdown through `sync-youtube-links.py`.
-- Images are stored as Markdown intake notes first. OCR, screenshot parsing, UI understanding, and vision-model extraction are planned as importer modules that fill the `Extracted Data` section.
+- Images, text files, DOCX/PDF documents, audio, video, and generic files are stored as Markdown intake notes first. Text and DOCX are extracted immediately when possible.
+- Heavier sources are queued in `tmp/material-processing-queue.jsonl` for OCR, ASR/transcription, document parsing, cleanup, and later LightRAG reindexing.
 - Heavy source files should be temporary inputs. After processing, keep extracted text, transcript, metadata, and references, not the original large file.
-- PDF, DOCX, social networks, arbitrary video links, audio transcription, image OCR/vision, and transcript cleanup are planned as importer modules around the same Markdown-first pipeline.
 
 ## Optimization Notes
 

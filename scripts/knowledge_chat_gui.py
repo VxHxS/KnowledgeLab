@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 import json
 import os
 import re
@@ -15,6 +16,7 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 import urllib.request
 import webbrowser
+import zipfile
 from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 
@@ -29,6 +31,7 @@ CONTROL_SCRIPT = ROOT / "LightRAG-Control.ps1"
 LEGACY_HISTORY_PATH = Path(os.getenv("KNOWLEDGELAB_LEGACY_HISTORY_PATH", str(ROOT / "tmp" / "knowledge-chat-history.jsonl")))
 CHAT_STORE_PATH = Path(os.getenv("KNOWLEDGELAB_CHAT_STORE_PATH", str(ROOT / "tmp" / "knowledge-chat-sessions.json")))
 SETTINGS_PATH = Path(os.getenv("KNOWLEDGELAB_CHAT_SETTINGS_PATH", str(ROOT / "tmp" / "knowledge-chat-settings.json")))
+MATERIAL_QUEUE_PATH = Path(os.getenv("KNOWLEDGELAB_MATERIAL_QUEUE_PATH", str(ROOT / "tmp" / "material-processing-queue.jsonl")))
 OBSIDIAN_ICON = ROOT / "assets" / "icons" / "Obsidian.png"
 NEW_CHAT_ICON = ROOT / "assets" / "icons" / "new-chat.png"
 WEB_SEARCH_ICON = ROOT / "assets" / "icons" / "web-search.png"
@@ -53,6 +56,25 @@ IMAGE_FILETYPES = [
     ("JPEG", "*.jpg *.jpeg"),
     ("All files", "*.*"),
 ]
+TEXT_EXTENSIONS = {
+    ".txt", ".md", ".markdown", ".csv", ".tsv", ".json", ".jsonl", ".yaml", ".yml", ".xml", ".html", ".htm",
+    ".py", ".ps1", ".js", ".jsx", ".ts", ".tsx", ".css", ".scss", ".less", ".html", ".cs", ".cpp", ".h",
+    ".hpp", ".java", ".kt", ".go", ".rs", ".php", ".rb", ".sql", ".log",
+}
+DOC_EXTENSIONS = {".docx", ".pdf", ".rtf", ".odt", ".epub"}
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wma"}
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv"}
+SUPPORTED_FILETYPES = [
+    ("Knowledge sources", "*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff *.txt *.md *.csv *.json *.docx *.pdf *.mp3 *.wav *.m4a *.mp4 *.mkv *.mov *.webm"),
+    ("Images", "*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff"),
+    ("Documents", "*.txt *.md *.csv *.json *.docx *.pdf *.rtf *.odt *.epub"),
+    ("Audio", "*.mp3 *.wav *.m4a *.aac *.ogg *.opus *.flac *.wma"),
+    ("Video", "*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.wmv"),
+    ("All files", "*.*"),
+]
+TEXT_EXTRACTION_LIMIT = 90000
+FILE_CAPTURE_KINDS = {"text_file", "document_file", "audio_file", "video_file", "generic_file"}
+VOICE_INPUT_SECONDS = 8
 
 BUTTON_COLOR_PRESETS = {
     "Blue": "#3d5f88",
@@ -385,6 +407,113 @@ class IconButton(tk.Canvas):
         self.create_polygon(points, smooth=True, fill=fill, outline=outline)
 
 
+class MiniToolButton(tk.Canvas):
+    def __init__(
+        self,
+        parent: tk.Widget,
+        icon: str,
+        command,
+        *,
+        size: int = 30,
+        background: str = "#ffffff",
+    ) -> None:
+        super().__init__(
+            parent,
+            width=size,
+            height=size,
+            background=background,
+            highlightthickness=0,
+            bd=0,
+            cursor="hand2",
+            takefocus=True,
+        )
+        self.icon = icon
+        self.command = command
+        self.size = size
+        self.background = background
+        self.hover = False
+        self.pressed = False
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+        self.bind("<ButtonPress-1>", self.on_press)
+        self.bind("<ButtonRelease-1>", self.on_click)
+        self.bind("<space>", self.on_keyboard)
+        self.bind("<Return>", self.on_keyboard)
+        self.redraw()
+
+    def configure(self, cnf=None, **kwargs):  # type: ignore[override]
+        if cnf:
+            kwargs.update(cnf)
+        state = kwargs.get("state")
+        result = super().configure(**kwargs)
+        if state is not None:
+            super().configure(cursor="hand2" if state != "disabled" else "arrow")
+            self.redraw()
+        return result
+
+    config = configure
+
+    def on_enter(self, _event: tk.Event | None = None) -> None:
+        self.hover = True
+        self.redraw()
+
+    def on_leave(self, _event: tk.Event | None = None) -> None:
+        self.hover = False
+        self.pressed = False
+        self.redraw()
+
+    def on_press(self, _event: tk.Event | None = None) -> None:
+        if str(self.cget("state")) == "disabled":
+            return
+        self.pressed = True
+        self.redraw()
+
+    def on_click(self, _event: tk.Event | None = None) -> None:
+        if str(self.cget("state")) == "disabled":
+            return
+        self.pressed = False
+        self.redraw()
+        if self.command:
+            self.command()
+
+    def on_keyboard(self, _event: tk.Event | None = None) -> str:
+        self.on_click()
+        return "break"
+
+    def redraw(self) -> None:
+        self.delete("all")
+        disabled = str(self.cget("state")) == "disabled"
+        bg = "#edf3fb" if self.pressed else ("#f6f8fb" if self.hover else self.background)
+        outline = "#c7d2de" if self.hover or self.pressed else self.background
+        icon = "#9aa5b1" if disabled else "#384655"
+        self.create_rectangle(0, 0, self.size, self.size, fill=self.background, outline="")
+        self.rounded_rect(1, 1, self.size - 1, self.size - 1, 8, fill=bg, outline=outline)
+        if self.icon == "microphone":
+            self.draw_microphone(icon)
+        else:
+            self.draw_attachment(icon)
+
+    def draw_microphone(self, color: str) -> None:
+        cx = self.size // 2
+        self.create_oval(cx - 5, 6, cx + 5, 18, outline=color, width=2)
+        self.create_line(cx - 9, 15, cx - 9, 17, cx - 6, 21, cx, 23, cx + 6, 21, cx + 9, 17, cx + 9, 15, fill=color, width=2, smooth=True)
+        self.create_line(cx, 23, cx, 26, fill=color, width=2)
+        self.create_line(cx - 5, 26, cx + 5, 26, fill=color, width=2)
+
+    def draw_attachment(self, color: str) -> None:
+        self.create_arc(9, 6, 23, 24, start=215, extent=290, outline=color, width=2, style="arc")
+        self.create_arc(12, 9, 20, 20, start=215, extent=290, outline=color, width=2, style="arc")
+        self.create_line(13, 21, 22, 12, fill=color, width=2)
+
+    def rounded_rect(self, x1: int, y1: int, x2: int, y2: int, radius: int, *, fill: str, outline: str) -> None:
+        points = [
+            x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
+            x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
+            x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1,
+        ]
+        self.create_polygon(points, smooth=True, fill=fill, outline=outline)
+
+
 class WebSearchToggleButton(tk.Canvas):
     def __init__(
         self,
@@ -626,6 +755,14 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
             return base / "Sources" / "Articles"
         if kind == "image_capture":
             return base / "Sources" / "Images"
+        if kind == "document_file":
+            return base / "Sources" / "Documents"
+        if kind == "audio_file":
+            return base / "Sources" / "Audio"
+        if kind == "video_file":
+            return base / "Sources" / "Video"
+        if kind in {"text_file", "generic_file"}:
+            return base / "Sources" / "Files"
         if kind == "solution":
             return base / "Solutions"
         return base / "Topics" / clean_filename(topic)
@@ -639,6 +776,14 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
             return base / "Sources" / "Articles"
         if kind == "image_capture":
             return base / "Sources" / "Images"
+        if kind == "document_file":
+            return base / "Sources" / "Documents"
+        if kind == "audio_file":
+            return base / "Sources" / "Audio"
+        if kind == "video_file":
+            return base / "Sources" / "Video"
+        if kind in {"text_file", "generic_file"}:
+            return base / "Sources" / "Files"
         return base / "Captures"
     if kind == "youtube_link":
         return VAULT_DIR / "30 Sources" / "YouTube" / "Links"
@@ -648,6 +793,14 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
         return VAULT_DIR / "30 Sources" / "Articles"
     if kind == "image_capture":
         return VAULT_DIR / "00 Inbox" / "Images"
+    if kind == "document_file":
+        return VAULT_DIR / "00 Inbox" / "Documents"
+    if kind == "audio_file":
+        return VAULT_DIR / "00 Inbox" / "Audio"
+    if kind == "video_file":
+        return VAULT_DIR / "00 Inbox" / "Video"
+    if kind in {"text_file", "generic_file"}:
+        return VAULT_DIR / "00 Inbox" / "Files"
     return VAULT_DIR / "00 Inbox"
 
 
@@ -743,6 +896,169 @@ def render_image_capture_markdown(
         "_Pending OCR/vision extraction. The heavy image file is not copied into the vault by default._",
         "",
     ]
+    return "\n".join(frontmatter + body)
+
+
+def classify_source_file(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in IMAGE_EXTENSIONS:
+        return "image_capture"
+    if suffix in TEXT_EXTENSIONS:
+        return "text_file"
+    if suffix in DOC_EXTENSIONS:
+        return "document_file"
+    if suffix in AUDIO_EXTENSIONS:
+        return "audio_file"
+    if suffix in VIDEO_EXTENSIONS:
+        return "video_file"
+    return "generic_file"
+
+
+def extraction_label(kind: str) -> str:
+    return {
+        "image_capture": "OCR/vision extraction",
+        "text_file": "text extraction",
+        "document_file": "document text extraction",
+        "audio_file": "speech transcription",
+        "video_file": "video/audio transcription",
+        "generic_file": "custom extraction",
+    }.get(kind, "custom extraction")
+
+
+def file_kind_label(kind: str) -> str:
+    return {
+        "image_capture": "image",
+        "text_file": "text",
+        "document_file": "document",
+        "audio_file": "audio",
+        "video_file": "video",
+        "generic_file": "file",
+    }.get(kind, "file")
+
+
+def read_text_source(path: Path) -> tuple[str, str]:
+    try:
+        raw = path.read_bytes()[: TEXT_EXTRACTION_LIMIT + 4096]
+    except OSError as exc:
+        return "", f"read failed: {exc}"
+    for encoding in ("utf-8-sig", "utf-8", "cp1251", "utf-16"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            text = ""
+    if not text:
+        text = raw.decode("utf-8", errors="replace")
+    truncated = len(text) > TEXT_EXTRACTION_LIMIT
+    text = text[:TEXT_EXTRACTION_LIMIT].strip()
+    status = "extracted"
+    if truncated:
+        status = "partial"
+        text += "\n\n_Extraction was truncated; use a dedicated importer for the full file._"
+    return text, status
+
+
+def read_docx_source(path: Path) -> tuple[str, str]:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            raw = archive.read("word/document.xml").decode("utf-8", errors="replace")
+    except Exception as exc:
+        return "", f"docx extraction failed: {exc}"
+    raw = re.sub(r"</w:p\s*>", "\n", raw)
+    raw = re.sub(r"<[^>]+>", "", raw)
+    text = html.unescape(raw)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text).strip()
+    truncated = len(text) > TEXT_EXTRACTION_LIMIT
+    text = text[:TEXT_EXTRACTION_LIMIT].strip()
+    if truncated:
+        text += "\n\n_Extraction was truncated; use a dedicated importer for the full document._"
+        return text, "partial"
+    return text, "extracted" if text else "pending"
+
+
+def extract_lightweight_file_text(path: Path, kind: str) -> tuple[str, str]:
+    if kind == "text_file":
+        return read_text_source(path)
+    if path.suffix.lower() == ".docx":
+        return read_docx_source(path)
+    return "", "pending"
+
+
+def render_file_capture_markdown(
+    file_path: Path,
+    caption: str,
+    context_name: str,
+    scope: str,
+    project: str,
+    topic: str,
+    kind: str,
+    extracted_text: str,
+    extraction_status: str,
+) -> str:
+    stat = file_path.stat()
+    tags = ["captured/chat", "source/file"]
+    if kind == "image_capture":
+        tags.append("source/image")
+    if kind == "audio_file":
+        tags.append("source/audio")
+    if kind == "video_file":
+        tags.append("source/video")
+    if kind == "document_file":
+        tags.append("source/document")
+    if extraction_status in {"extracted", "partial"}:
+        tags.append(f"extraction/{extraction_status}")
+    else:
+        tags.append(f"needs/{slugify(extraction_label(kind))}")
+    if project:
+        tags.append(f"project/{project}")
+    if topic:
+        tags.append(f"topic/{slugify(topic)}")
+    title_seed = caption.strip() or file_path.stem
+    title = clean_filename(title_seed)
+    frontmatter = [
+        "---",
+        f"type: {kind}",
+        "source: file",
+        f"source_path: {yaml_quote(str(file_path))}",
+        f"file_name: {yaml_quote(file_path.name)}",
+        f"file_extension: {yaml_quote(file_path.suffix.lower())}",
+        f"file_size_bytes: {stat.st_size}",
+        f"scope: {scope}",
+        f"project: {yaml_quote(project)}",
+        f"topic: {yaml_quote(topic)}",
+        f"captured_at: {yaml_quote(now_iso())}",
+        f"extraction_status: {yaml_quote(extraction_status)}",
+        f"tags: [{', '.join(tags)}]",
+        "---",
+        "",
+    ]
+    body = [
+        f"# {title}",
+        "",
+        "## File Intake",
+        "",
+        f"- Original file: `{file_path}`",
+        f"- File name: `{file_path.name}`",
+        f"- Size: {stat.st_size} bytes",
+        f"- Suggested context: {context_name}",
+        f"- Suggested topic: {topic or 'None'}",
+        f"- Planned processing: {extraction_label(kind)}",
+        "",
+        "## User Hint",
+        "",
+        caption.strip() or "_No hint was provided._",
+        "",
+        "## Extracted Data",
+        "",
+    ]
+    if extracted_text:
+        body.extend([extracted_text.strip(), ""])
+    else:
+        body.extend([
+            f"_Pending {extraction_label(kind)}. The heavy source file is not copied into the vault by default._",
+            "",
+        ])
     return "\n".join(frontmatter + body)
 
 
@@ -1018,6 +1334,47 @@ def run_static_self_test() -> int:
         failures.append("LightRAG status intent was not recognized")
     if not is_russian_language_request("на русском пж"):
         failures.append("Russian language preference was not recognized")
+    expected_kinds = {
+        "shot.png": "image_capture",
+        "notes.md": "text_file",
+        "brief.docx": "document_file",
+        "voice.mp3": "audio_file",
+        "clip.mp4": "video_file",
+        "archive.bin": "generic_file",
+    }
+    for name, expected in expected_kinds.items():
+        actual = classify_source_file(Path(name))
+        if actual != expected:
+            failures.append(f"file classification failed for {name}: {actual}")
+    with tempfile.TemporaryDirectory(prefix="knowledgelab-file-test-") as tmp:
+        tmp_dir = Path(tmp)
+        text_path = tmp_dir / "notes.md"
+        text_path.write_text("Привет\n\nSaved material", encoding="utf-8")
+        extracted, status = read_text_source(text_path)
+        if status != "extracted" or "Saved material" not in extracted:
+            failures.append(f"text extraction failed: {status}")
+        docx_path = tmp_dir / "brief.docx"
+        with zipfile.ZipFile(docx_path, "w") as archive:
+            archive.writestr(
+                "word/document.xml",
+                "<w:document><w:body><w:p><w:r><w:t>Docx material</w:t></w:r></w:p></w:body></w:document>",
+            )
+        docx_text, docx_status = read_docx_source(docx_path)
+        if docx_status != "extracted" or "Docx material" not in docx_text:
+            failures.append(f"docx extraction failed: {docx_status}")
+        markdown = render_file_capture_markdown(
+            text_path,
+            "hint",
+            "General",
+            "general",
+            "",
+            "",
+            "text_file",
+            extracted,
+            status,
+        )
+        if "source_path:" not in markdown or "## Extracted Data" not in markdown:
+            failures.append("file capture markdown missing expected sections")
     if failures:
         print("\n".join(failures))
         return 1
@@ -1550,8 +1907,14 @@ class KnowledgeChatApp:
         main.columnconfigure(1, weight=1)
         main.rowconfigure(0, weight=1)
 
-        sidebar_shell = tk.Frame(main, bg="#cfd4da", padx=1, pady=1)
-        sidebar_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        sidebar_shadow = tk.Frame(main, bg="#dfe5ec")
+        sidebar_shadow.grid(row=0, column=0, sticky="nsew", padx=(0, 10), pady=(0, 2))
+        sidebar_shadow.configure(width=262)
+        sidebar_shadow.grid_propagate(False)
+        sidebar_shadow.columnconfigure(0, weight=1)
+        sidebar_shadow.rowconfigure(0, weight=1)
+        sidebar_shell = tk.Frame(sidebar_shadow, bg="#cfd4da", padx=1, pady=1)
+        sidebar_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=(0, 2))
         sidebar_shell.configure(width=260)
         sidebar_shell.grid_propagate(False)
         sidebar_shell.columnconfigure(0, weight=1)
@@ -1590,8 +1953,13 @@ class KnowledgeChatApp:
         chat_area.columnconfigure(0, weight=1)
         chat_area.rowconfigure(0, weight=1)
 
-        chat_shell = tk.Frame(chat_area, bg="#cfd4da", padx=1, pady=1)
-        chat_shell.grid(row=0, column=0, sticky="nsew")
+        chat_shadow = tk.Frame(chat_area, bg="#dfe5ec")
+        chat_shadow.grid(row=0, column=0, sticky="nsew", pady=(0, 2))
+        chat_shadow.columnconfigure(0, weight=1)
+        chat_shadow.rowconfigure(0, weight=1)
+
+        chat_shell = tk.Frame(chat_shadow, bg="#cfd4da", padx=1, pady=1)
+        chat_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=(0, 2))
         chat_shell.columnconfigure(0, weight=1)
         chat_shell.rowconfigure(0, weight=1)
 
@@ -1620,11 +1988,14 @@ class KnowledgeChatApp:
         input_frame = ttk.Frame(chat_area, style="Composer.TFrame")
         input_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         input_frame.columnconfigure(0, weight=1)
-        input_shell = tk.Frame(input_frame, bg="#cfd4da", padx=1, pady=1)
-        input_shell.grid(row=0, column=0, sticky="ew")
+        composer_shadow = tk.Frame(input_frame, bg="#dfe5ec")
+        composer_shadow.grid(row=0, column=0, sticky="ew", pady=(0, 2))
+        composer_shadow.columnconfigure(0, weight=1)
+
+        input_shell = tk.Frame(composer_shadow, bg="#cfd4da", padx=1, pady=1)
+        input_shell.grid(row=0, column=0, sticky="ew", padx=(0, 2), pady=(0, 2))
         input_shell.columnconfigure(0, weight=1)
-        input_shell.columnconfigure(1, weight=0)
-        input_shell.columnconfigure(2, weight=0)
+        input_shell.rowconfigure(0, weight=1)
 
         self.input = tk.Text(
             input_shell,
@@ -1640,23 +2011,18 @@ class KnowledgeChatApp:
             font=("Segoe UI", 10),
         )
         self.input.grid(row=0, column=0, sticky="ew")
-        self.image_attach_button = tk.Button(
-            input_shell,
-            text="IMG",
-            relief="flat",
-            bg="#ffffff",
-            activebackground="#e8f0fe",
-            fg="#384655",
-            activeforeground="#1a73e8",
-            command=self.attach_images,
-            cursor="hand2",
-            font=("Segoe UI Semibold", 8),
-        )
-        self.image_attach_button.grid(row=0, column=1, sticky="ne", padx=(6, 0), pady=8, ipadx=4, ipady=5)
-        self.add_tooltip(self.image_attach_button, "Прикрепить изображение в библиотеку.")
-        self.web_search_button = WebSearchToggleButton(input_shell, self.toggle_web_search, image=self.web_search_image, width=46, height=30, background="#ffffff")
-        self.web_search_button.grid(row=0, column=2, sticky="ne", padx=(6, 8), pady=8)
+        tool_strip = tk.Frame(input_shell, bg="#ffffff")
+        tool_strip.grid(row=1, column=0, sticky="ew")
+        tool_strip.columnconfigure(3, weight=1)
+        self.web_search_button = WebSearchToggleButton(tool_strip, self.toggle_web_search, image=self.web_search_image, width=46, height=30, background="#ffffff")
+        self.web_search_button.grid(row=0, column=0, sticky="w", padx=(8, 4), pady=(0, 8))
         self.add_tooltip(self.web_search_button, "Включить/выключить web-поиск для LLM.")
+        self.file_attach_button = MiniToolButton(tool_strip, "attachment", self.attach_files, size=30, background="#ffffff")
+        self.file_attach_button.grid(row=0, column=1, sticky="w", padx=4, pady=(0, 8))
+        self.add_tooltip(self.file_attach_button, "Прикрепить файл: изображение, текст, документ, аудио или видео.")
+        self.voice_button = MiniToolButton(tool_strip, "microphone", self.start_voice_input, size=30, background="#ffffff")
+        self.voice_button.grid(row=0, column=2, sticky="w", padx=4, pady=(0, 8))
+        self.add_tooltip(self.voice_button, "Диктовка через Windows Speech Recognition. Текст вставится в поле ввода.")
         self.input.bind("<Control-Return>", self.on_ctrl_return)
         self.input.bind("<Shift-Return>", self.on_shift_return)
         self.input.bind("<Return>", self.on_return)
@@ -1883,12 +2249,17 @@ class KnowledgeChatApp:
 
     def health_worker(self) -> None:
         warnings = self.diagnose_system()
-        if warnings:
-            self.root.after(0, self.finish_health_probe, warnings)
+        self.root.after(0, self.finish_health_probe, warnings)
 
     def finish_health_probe(self, warnings: list[str]) -> None:
         chat = self.get_active_chat()
         has_messages = bool(chat and chat.get("messages"))
+        if not has_messages:
+            self.render_current_chat()
+        if not warnings:
+            if not has_messages:
+                self.status_var.set("Ready")
+            return
         for warning in warnings:
             self.append_warning_message(warning, persist=False)
         if not has_messages:
@@ -2289,6 +2660,78 @@ class KnowledgeChatApp:
         self.clear_input()
         self.input.insert("1.0", text)
 
+    def append_to_input(self, text: str) -> None:
+        clean_text = text.strip()
+        if not clean_text:
+            return
+        if self.input_text():
+            self.input.insert("end", "\n" + clean_text)
+        else:
+            self.input.insert("1.0", clean_text)
+        self.input.focus_set()
+
+    def start_voice_input(self) -> None:
+        if self.busy:
+            return
+        operation_id = self.begin_operation("Listening...", VOICE_INPUT_SECONDS + 5)
+        threading.Thread(target=self.voice_input_worker, args=(operation_id,), daemon=True).start()
+
+    def voice_input_worker(self, operation_id: int) -> None:
+        script = f"""
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Speech
+$recognizer = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+try {{
+  $recognizer.SetInputToDefaultAudioDevice()
+  $grammar = New-Object System.Speech.Recognition.DictationGrammar
+  $recognizer.LoadGrammar($grammar)
+  $result = $recognizer.Recognize([System.TimeSpan]::FromSeconds({VOICE_INPUT_SECONDS}))
+  if ($null -ne $result -and $result.Text) {{
+    Write-Output $result.Text
+  }}
+}} finally {{
+  if ($recognizer) {{
+    $recognizer.Dispose()
+  }}
+}}
+"""
+        try:
+            returncode, output = self.run_command(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+                VOICE_INPUT_SECONDS + 4,
+            )
+            text = output.strip() if returncode == 0 else ""
+            error = "" if text else self.friendly_voice_error(output)
+        except TimeoutError:
+            text = ""
+            error = "Не услышал речь за отведенное время. Попробуйте еще раз или вставьте текст вручную."
+        except Exception:
+            text = ""
+            error = "Не удалось запустить диктовку. Для надежного локального ввода позже можно подключить Whisper/faster-whisper."
+        self.root.after(0, self.finish_voice_input, operation_id, text, error)
+
+    def friendly_voice_error(self, output: str) -> str:
+        cleaned = self.trim_output(output)
+        lowered = cleaned.lower()
+        if "system.speech" in lowered or "add-type" in lowered:
+            return "Windows Speech Recognition недоступен в этой системе. Для локального голоса нужен системный recognizer или будущий Whisper importer."
+        if "no recognizer" in lowered or "default audio device" in lowered or "input" in lowered:
+            return "Не удалось получить звук с микрофона или найти установленный recognizer. Проверьте микрофон в Windows."
+        return "Не услышал речь. Попробуйте еще раз или вставьте текст вручную."
+
+    def finish_voice_input(self, operation_id: int, text: str, error: str) -> None:
+        if not self.is_active_operation(operation_id):
+            return
+        if text.strip():
+            self.append_to_input(text)
+            final_status = "Voice inserted"
+        else:
+            self.append_warning_message(error, persist=False)
+            final_status = "Ready"
+        self.set_busy(False, final_status)
+
     def toggle_web_search(self) -> None:
         if self.busy:
             return
@@ -2437,63 +2880,136 @@ class KnowledgeChatApp:
         path.write_text(render_capture_markdown(text, context_name, scope, project, topic, kind), encoding="utf-8-sig")
         return path.relative_to(VAULT_DIR).as_posix()
 
-    def save_image_capture(self, image_path: Path, caption: str, route: tuple[str, str, str]) -> str:
-        if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
-            raise ValueError(f"Unsupported image format: {image_path.suffix}")
+    def queue_file_processing(
+        self,
+        file_path: Path,
+        rel_path: str,
+        kind: str,
+        scope: str,
+        project: str,
+        topic: str,
+        extraction_status: str,
+    ) -> None:
+        MATERIAL_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        item = {
+            "queued_at": now_iso(),
+            "source_path": str(file_path),
+            "vault_note": rel_path,
+            "kind": kind,
+            "scope": scope,
+            "project": project,
+            "topic": topic,
+            "status": "queued",
+            "extraction_status": extraction_status,
+            "planned_processing": extraction_label(kind),
+        }
+        with MATERIAL_QUEUE_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+    def material_queue_display_path(self) -> str:
+        try:
+            return MATERIAL_QUEUE_PATH.relative_to(ROOT).as_posix()
+        except ValueError:
+            return str(MATERIAL_QUEUE_PATH)
+
+    def save_file_capture(self, file_path: Path, caption: str, route: tuple[str, str, str]) -> tuple[str, str, str]:
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        if file_path.is_dir():
+            raise ValueError("Folder attachment is not supported yet; choose files inside the folder.")
         context_name, scope, project = route
-        hint = f"{caption} {image_path.stem}".strip()
+        kind = classify_source_file(file_path)
+        hint = f"{caption} {file_path.stem} {file_path.suffix}".strip()
         topic = infer_topic(hint, scope)
         if scope == "general" and not caption.strip() and topic == "General":
             topic = ""
-        kind = "image_capture"
+        extracted_text, extraction_status = extract_lightweight_file_text(file_path, kind)
         destination = capture_destination(scope, topic, kind)
         destination.mkdir(parents=True, exist_ok=True)
-        title_seed = caption.strip() or image_path.stem
+        title_seed = caption.strip() or file_path.stem
         if topic:
             title_seed = f"{topic} - {title_seed}"
         path = unique_path(destination / f"{clean_filename(title_seed)}.md")
-        path.write_text(render_image_capture_markdown(image_path, caption, context_name, scope, project, topic), encoding="utf-8-sig")
-        return path.relative_to(VAULT_DIR).as_posix()
+        path.write_text(
+            render_file_capture_markdown(
+                file_path,
+                caption,
+                context_name,
+                scope,
+                project,
+                topic,
+                kind,
+                extracted_text,
+                extraction_status,
+            ),
+            encoding="utf-8-sig",
+        )
+        rel_path = path.relative_to(VAULT_DIR).as_posix()
+        self.queue_file_processing(file_path, rel_path, kind, scope, project, topic, extraction_status)
+        return rel_path, kind, extraction_status
+
+    def save_image_capture(self, image_path: Path, caption: str, route: tuple[str, str, str]) -> str:
+        if image_path.suffix.lower() not in IMAGE_EXTENSIONS:
+            raise ValueError(f"Unsupported image format: {image_path.suffix}")
+        rel_path, _kind, _status = self.save_file_capture(image_path, caption, route)
+        return rel_path
 
     def attach_images(self) -> None:
+        self.attach_files(title="Выберите изображения", filetypes=IMAGE_FILETYPES)
+
+    def attach_files(self, title: str = "Выберите материалы", filetypes=None) -> None:
         if self.busy:
             return
         files = filedialog.askopenfilenames(
-            title="Выберите изображения",
-            filetypes=IMAGE_FILETYPES,
+            title=title,
+            filetypes=filetypes or SUPPORTED_FILETYPES,
             parent=self.root,
         )
         if not files:
             return
         caption = self.input_text()
+        route_seed = " ".join([caption] + [Path(file_name).name for file_name in files[:4]]).strip()
+        suggested_route = self.selected_route(route_seed)
+        route = self.choose_capture_context(suggested_route)
+        if not route:
+            self.append_warning_message("Сохранение файлов отменено.", persist=False)
+            return
         saved: list[str] = []
+        extracted_count = 0
         errors: list[str] = []
-        user_lines = ["Изображения:"]
+        user_lines = ["Файлы:"]
         for file_name in files:
-            image_path = Path(file_name)
-            if not image_path.exists():
-                errors.append(f"{image_path.name}: файл не найден")
+            source_path = Path(file_name)
+            if not source_path.exists():
+                errors.append(f"{source_path.name}: файл не найден")
                 continue
-            route = self.selected_route(f"{caption} {image_path.name}".strip())
             try:
-                rel_path = self.save_image_capture(image_path, caption, route)
+                rel_path, kind, extraction_status = self.save_file_capture(source_path, caption, route)
                 saved.append(rel_path)
-                user_lines.append(f"- {image_path.name}")
+                if extraction_status in {"extracted", "partial"}:
+                    extracted_count += 1
+                user_lines.append(f"- {source_path.name} ({file_kind_label(kind)})")
             except Exception as exc:
-                errors.append(f"{image_path.name}: {exc}")
+                errors.append(f"{source_path.name}: {exc}")
         if caption:
             user_lines.extend(["", caption])
         if saved:
             self.append_user_message("\n".join(user_lines))
             self.clear_input()
-            self.append_assistant_message(
-                "Сохранил image-intake в Obsidian:\n"
+            message = (
+                "Сохранил file-intake в Obsidian:\n"
                 + "\n".join(f"- {path}" for path in saved)
-                + "\n\nИзвлечение данных помечено как pending: для полноценного OCR/vision нужен следующий importer-шаг.",
-                lightrag_used=False,
+                + "\n\nОригиналы не копируются в vault: в заметках сохранены путь, метаданные и легкий извлеченный текст, где это возможно."
+                + f"\nОчередь обработки обновлена: {self.material_queue_display_path()}."
             )
+            if extracted_count:
+                self.launch_reindex(route)
+                message += "\nДля файлов с уже извлеченным текстом запустил обновление LightRAG в фоне."
+            else:
+                message += "\nOCR/ASR/документ-парсинг помечены как следующие importer-шаги."
+            self.append_assistant_message(message, lightrag_used=False)
         if errors:
-            self.append_warning_message("Не удалось сохранить часть изображений:\n" + "\n".join(errors), persist=False)
+            self.append_warning_message("Не удалось сохранить часть файлов:\n" + "\n".join(errors), persist=False)
 
     def capture_path_from_rel(self, rel_path: str) -> Path:
         return VAULT_DIR / rel_path.replace("/", os.sep)
@@ -2939,8 +3455,10 @@ class KnowledgeChatApp:
         self.clear_button.configure(state=state)
         if hasattr(self, "web_search_button"):
             self.web_search_button.configure(state=state)
-        if hasattr(self, "image_attach_button"):
-            self.image_attach_button.configure(state=state)
+        if hasattr(self, "file_attach_button"):
+            self.file_attach_button.configure(state=state)
+        if hasattr(self, "voice_button"):
+            self.voice_button.configure(state=state)
         if not busy:
             self.cancel_busy_timer()
             self.set_active_process(None)

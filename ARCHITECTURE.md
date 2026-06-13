@@ -1,6 +1,6 @@
 # KnowledgeLab Architecture
 
-State date: 2026-06-06.
+State date: 2026-06-13.
 
 KnowledgeLab is a local-first Windows knowledge system. The chat is an ordinary LM Studio chat by default, with optional LightRAG retrieval, Obsidian capture, diagnostics, and GPU conflict warnings as capabilities around the conversation.
 
@@ -34,6 +34,9 @@ C:\MyFiles\KnowledgeLab\tmp\knowledge-chat-sessions.json
 Chat settings:
 C:\MyFiles\KnowledgeLab\tmp\knowledge-chat-settings.json
 
+Material queue:
+C:\MyFiles\KnowledgeLab\tmp\material-processing-queue.jsonl
+
 LM Studio API:
 http://127.0.0.1:1234/v1
 ```
@@ -48,7 +51,7 @@ flowchart TD
     Settings["Settings<br/>Enter, LightRAG, colors, Obsidian, vault, Game Guard"]
     Router["Intent Router<br/>plain chat / RAG / save / status / diagnostics"]
     Save["Obsidian Capture<br/>Markdown notes"]
-    Pipeline["Material Pipeline<br/>web parse / YouTube transcript / image intake / future OCR PDF DOCX social"]
+    Pipeline["Material Pipeline<br/>web parse / YouTube transcript / file intake queue / OCR ASR documents"]
     Health["Health Hints<br/>LM Studio, LightRAG index, Obsidian path"]
     Guard["GPU Game Guard<br/>delayed warning after chat opens"]
     DirectLM["Direct LM Studio Adapter<br/>/v1/models + /v1/chat/completions"]
@@ -122,13 +125,13 @@ sequenceDiagram
 
 | Component | Role |
 | --- | --- |
-| Chat UI | Messenger-style Tkinter app with left chat history, row-level rename/delete, settings, full-icon Obsidian button, cancel and timeout protection |
+| Chat UI | Messenger-style Tkinter app with left chat history, row-level rename/delete, settings, full-icon Obsidian button, lower-left composer tools, cancel and timeout protection |
 | Conversation Store | Local JSON sessions with messages, warnings, timestamps, and current chat |
 | Intent Router | Treats all input as normal chat first, then activates save/RAG/diagnostic capabilities when appropriate |
 | Direct LM Studio Adapter | Checks `/v1/models`, validates loaded model IDs, and sends plain chat directly to `/v1/chat/completions` |
 | LightRAG Adapter | Uses indexed storage only when LightRAG is enabled in Settings and storage exists |
-| Obsidian Capture | Saves URLs and notes from phrases like `вот ссылка`, `сохрани`, `добавь в базу` |
-| Material Pipeline | Parses web pages into Markdown, syncs YouTube transcripts, saves image intake notes, and provides the future extension point for OCR, PDF, DOCX, social networks, arbitrary video, audio, and transcript cleanup |
+| Obsidian Capture | Saves URLs, notes, and attached files from chat into lightweight Markdown notes |
+| Material Pipeline | Parses web pages into Markdown, syncs YouTube transcripts, extracts lightweight text/DOCX content, queues images/PDF/audio/video/generic sources in `tmp/material-processing-queue.jsonl`, and provides the extension point for OCR, ASR, document cleanup, and reindexing |
 | Health Hints | Converts system failures into readable guidance and suggests LightRAG-Control |
 | GPU Game Guard | Samples GPU load after chat opens; warns about heavy processes and KnowledgeLab-side processes |
 | LightRAG-Control | Manual checks, maintenance indexing, model stop, imports, and deeper troubleshooting |
@@ -151,9 +154,10 @@ sequenceDiagram
 - If LightRAG is enabled but the selected index is missing, LightRAG turns off, the answer uses plain LM Studio, and the user sees a gray note.
 - `Enter` sends by default; `Shift+Enter` adds a newline. This is configurable.
 - Big maintenance buttons stay out of the chat. Reindexing and deeper checks belong in LightRAG-Control.
-- Web search is a small input-side toggle: when enabled, the chat fetches search snippets and passes them into the LLM as temporary context without opening a browser for the user.
+- Web search is a small lower-left composer toggle: when enabled, the chat fetches search snippets and passes them into the LLM as temporary context without opening a browser for the user.
 - LightRAG is local-only. It does not crawl or search the web by itself; it can use web content only after the page/video/source is saved, parsed/transcribed, and indexed into the local vault.
-- Images can be attached from the chat as Markdown intake notes. The current step stores source path, topic guess, metadata, and pending extraction status; OCR/vision modules should later fill extracted text and optionally trigger reindexing.
+- Images, text files, documents, audio, video, and generic files can be attached from the chat as Markdown intake notes. The current step stores source path, topic guess, metadata, and extracted text for lightweight sources; heavier sources are queued for OCR/ASR/document processing and later reindexing. The original large file is not copied into the vault by default.
+- Voice input is a composer-side helper. It uses Windows Speech Recognition when available and inserts recognized text into the input field instead of auto-sending.
 - Obsidian opens through the right-edge icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.
 - Game Guard does not run at Windows startup by default. It samples GPU load a few seconds after the chat opens and warns only on sustained load.
 - The installer removes legacy Game Guard startup shortcuts left by older builds.
@@ -190,6 +194,7 @@ These are intentionally not committed:
 - `tmp/knowledge-chat-sessions.json`
 - `tmp/knowledge-chat-history.jsonl`
 - `tmp/knowledge-chat-settings.json`
+- `tmp/material-processing-queue.jsonl`
 - `.env`
 - downloaded models and archives
 - generated installer reports
