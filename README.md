@@ -87,7 +87,7 @@ Default behavior:
 - If LightRAG is enabled in Settings but the index is missing, LightRAG turns off and the answer continues through plain LM Studio.
 - The left column stores local chat sessions grouped by project/topic.
 - The web-search icon in the lower-left of the input composer toggles web context mode. When it is on, normal messages fetch search snippets and pass them into the LLM prompt; the browser is not opened for the user.
-- The paperclip button, or dragging files into the chat window, saves images, text files, DOCX/PDF documents, audio, video, or other files into Markdown intake notes. The microphone button tries Windows Speech Recognition and inserts recognized text into the input field.
+- The paperclip button, or dragging files into the chat window, saves images, text files, DOCX/PDF documents, audio, video, archives, or other files into Markdown intake notes. The microphone button tries Windows Speech Recognition and inserts recognized text into the input field.
 - LightRAG itself does not search the web. It retrieves from local indexed storage. Web material becomes LightRAG knowledge only after the material pipeline saves and indexes it.
 - The Obsidian icon opens the Obsidian app; if it is not found, the user can choose `Obsidian.exe` or open the Obsidian website.
 - Maintenance actions such as reindexing are handled in `LightRAG-Control`, not as large buttons in the chat.
@@ -99,7 +99,7 @@ KnowledgeLab should keep permanent storage lightweight:
 
 - Web pages are saved as Markdown notes and parsed text when possible.
 - YouTube links are stored as link notes, then converted into transcript Markdown through `sync-youtube-links.py`.
-- Images, text files, DOCX/PDF documents, audio, video, and generic files are stored as Markdown intake notes first. Text and DOCX are extracted immediately when possible.
+- Images, text files, DOCX/PDF documents, audio, video, archives, and generic files are stored as Markdown intake notes first. Text and DOCX are extracted immediately when possible.
 - Heavier sources are queued in `tmp/material-processing-queue.jsonl` for OCR, ASR/transcription, document parsing, cleanup, and later LightRAG reindexing. Original large files are referenced by path and are not copied into the vault by default.
 - Heavy source files should be temporary inputs. After processing, keep extracted text, transcript, metadata, and references, not the original large file.
 

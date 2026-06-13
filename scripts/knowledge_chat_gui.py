@@ -69,16 +69,18 @@ TEXT_EXTENSIONS = {
 DOC_EXTENSIONS = {".docx", ".pdf", ".rtf", ".odt", ".epub"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".wma"}
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv"}
+ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".xz"}
 SUPPORTED_FILETYPES = [
-    ("Knowledge sources", "*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff *.txt *.md *.csv *.json *.docx *.pdf *.mp3 *.wav *.m4a *.mp4 *.mkv *.mov *.webm"),
+    ("Knowledge sources", "*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff *.txt *.md *.csv *.json *.docx *.pdf *.mp3 *.wav *.m4a *.mp4 *.mkv *.mov *.webm *.zip *.rar *.7z"),
     ("Images", "*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tif *.tiff"),
     ("Documents", "*.txt *.md *.csv *.json *.docx *.pdf *.rtf *.odt *.epub"),
     ("Audio", "*.mp3 *.wav *.m4a *.aac *.ogg *.opus *.flac *.wma"),
     ("Video", "*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.wmv"),
+    ("Archives", "*.zip *.rar *.7z *.tar *.gz *.tgz *.bz2 *.xz"),
     ("All files", "*.*"),
 ]
 TEXT_EXTRACTION_LIMIT = 90000
-FILE_CAPTURE_KINDS = {"text_file", "document_file", "audio_file", "video_file", "generic_file"}
+FILE_CAPTURE_KINDS = {"text_file", "document_file", "audio_file", "video_file", "archive_file", "generic_file"}
 VOICE_INPUT_SECONDS = 8
 
 BUTTON_COLOR_PRESETS = {
@@ -779,6 +781,8 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
             return base / "Sources" / "Audio"
         if kind == "video_file":
             return base / "Sources" / "Video"
+        if kind == "archive_file":
+            return base / "Sources" / "Archives"
         if kind in {"text_file", "generic_file"}:
             return base / "Sources" / "Files"
         if kind == "solution":
@@ -800,6 +804,8 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
             return base / "Sources" / "Audio"
         if kind == "video_file":
             return base / "Sources" / "Video"
+        if kind == "archive_file":
+            return base / "Sources" / "Archives"
         if kind in {"text_file", "generic_file"}:
             return base / "Sources" / "Files"
         return base / "Captures"
@@ -817,6 +823,8 @@ def capture_destination(scope: str, topic: str, kind: str) -> Path:
         return VAULT_DIR / "00 Inbox" / "Audio"
     if kind == "video_file":
         return VAULT_DIR / "00 Inbox" / "Video"
+    if kind == "archive_file":
+        return VAULT_DIR / "00 Inbox" / "Archives"
     if kind in {"text_file", "generic_file"}:
         return VAULT_DIR / "00 Inbox" / "Files"
     return VAULT_DIR / "00 Inbox"
@@ -929,6 +937,8 @@ def classify_source_file(path: Path) -> str:
         return "audio_file"
     if suffix in VIDEO_EXTENSIONS:
         return "video_file"
+    if suffix in ARCHIVE_EXTENSIONS:
+        return "archive_file"
     return "generic_file"
 
 
@@ -939,6 +949,7 @@ def extraction_label(kind: str) -> str:
         "document_file": "document text extraction",
         "audio_file": "speech transcription",
         "video_file": "video/audio transcription",
+        "archive_file": "archive extraction",
         "generic_file": "custom extraction",
     }.get(kind, "custom extraction")
 
@@ -950,6 +961,7 @@ def file_kind_label(kind: str) -> str:
         "document_file": "document",
         "audio_file": "audio",
         "video_file": "video",
+        "archive_file": "archive",
         "generic_file": "file",
     }.get(kind, "file")
 
@@ -1024,6 +1036,8 @@ def render_file_capture_markdown(
         tags.append("source/video")
     if kind == "document_file":
         tags.append("source/document")
+    if kind == "archive_file":
+        tags.append("source/archive")
     if extraction_status in {"extracted", "partial"}:
         tags.append(f"extraction/{extraction_status}")
     else:
@@ -1361,6 +1375,7 @@ def run_static_self_test() -> int:
         "brief.docx": "document_file",
         "voice.mp3": "audio_file",
         "clip.mp4": "video_file",
+        "materials.zip": "archive_file",
         "archive.bin": "generic_file",
     }
     for name, expected in expected_kinds.items():
@@ -2821,25 +2836,27 @@ try {{
                 VOICE_INPUT_SECONDS + 4,
             )
             text = output.strip() if returncode == 0 else ""
-            error = "" if text else self.friendly_voice_error(output)
+            error, offer_settings = ("", False) if text else self.friendly_voice_error(output)
         except TimeoutError:
             text = ""
             error = "Не услышал речь за отведенное время. Попробуйте еще раз или вставьте текст вручную."
+            offer_settings = False
         except Exception:
             text = ""
             error = "Не удалось запустить диктовку. Для надежного локального ввода позже можно подключить Whisper/faster-whisper."
-        self.root.after(0, self.finish_voice_input, operation_id, text, error)
+            offer_settings = True
+        self.root.after(0, self.finish_voice_input, operation_id, text, error, offer_settings)
 
-    def friendly_voice_error(self, output: str) -> str:
+    def friendly_voice_error(self, output: str) -> tuple[str, bool]:
         cleaned = self.trim_output(output)
         lowered = cleaned.lower()
         if "system.speech" in lowered or "add-type" in lowered:
-            return "Windows Speech Recognition недоступен в этой системе. Для локального голоса нужен системный recognizer или будущий Whisper importer."
+            return "Windows Speech Recognition недоступен в этой системе. Проверьте системные настройки речи и микрофона Windows.", True
         if "no recognizer" in lowered or "default audio device" in lowered or "input" in lowered:
-            return "Не удалось получить звук с микрофона или найти установленный recognizer. Проверьте микрофон в Windows."
-        return "Не услышал речь. Попробуйте еще раз или вставьте текст вручную."
+            return "Не удалось получить звук с микрофона или найти установленный recognizer. Проверьте устройство ввода в Windows.", True
+        return "Не услышал речь. Попробуйте еще раз или вставьте текст вручную.", False
 
-    def finish_voice_input(self, operation_id: int, text: str, error: str) -> None:
+    def finish_voice_input(self, operation_id: int, text: str, error: str, offer_settings: bool = False) -> None:
         if not self.is_active_operation(operation_id):
             return
         self.voice_operation_id = None
@@ -2847,10 +2864,39 @@ try {{
         if text.strip():
             self.append_to_input(text)
             final_status = "Voice inserted"
+            settings_reason = ""
         else:
             self.append_warning_message(error, persist=False)
             final_status = "Ready"
+            settings_reason = error if offer_settings else ""
         self.set_busy(False, final_status)
+        if settings_reason:
+            self.offer_microphone_settings(settings_reason)
+
+    def offer_microphone_settings(self, reason: str) -> None:
+        if not messagebox.askyesno(
+            "Настройки микрофона",
+            f"{reason}\n\nОткрыть настройки звука Windows, чтобы выбрать микрофон и проверить ввод?",
+            parent=self.root,
+        ):
+            return
+        self.open_windows_microphone_settings()
+
+    def open_windows_microphone_settings(self) -> None:
+        try:
+            startfile = getattr(os, "startfile", None)
+            if startfile:
+                startfile("ms-settings:sound")
+                return
+            webbrowser.open("ms-settings:sound")
+        except Exception:
+            try:
+                subprocess.Popen(
+                    ["control", "mmsys.cpl,,1"],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            except Exception:
+                self.append_warning_message("Не удалось открыть настройки Windows автоматически. Откройте Settings -> System -> Sound -> Input.", persist=False)
 
     def set_tool_button_active(self, name: str, value: bool) -> None:
         button = getattr(self, name, None)
