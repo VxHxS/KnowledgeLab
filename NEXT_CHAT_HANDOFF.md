@@ -96,6 +96,17 @@ Update from 2026-06-13:
   `scripts\knowledge_chat_gui.py`, `README.md`, `ARCHITECTURE.md`, `NEXT_CHAT_HANDOFF.md`;
 - stale live file `assets\icons\rename-chat.png` was removed to match staging.
 
+Second update from 2026-06-13:
+
+- user-provided microphone and paperclip SVG files were added under `assets\icons`;
+- generated Tkinter-friendly PNG variants:
+  `microphone.png`, `microphone-active.png`, `attachment.png`, `attachment-active.png`;
+- file and microphone composer buttons now use these icon assets;
+- pressing/active state changes the icon itself to muted blue;
+- microphone input is now cancelable by pressing the active microphone again;
+- Windows native file drag-and-drop was added for the root window, chat area, and input field;
+- dropped files use the same file-intake route as the paperclip button.
+
 Verification run:
 
 ```text
@@ -103,6 +114,7 @@ py_compile: OK
 --self-test: OK
 live py_compile: OK
 live --self-test: OK
+icon asset self-test: OK
 git diff --check: OK
 installer dry-run: OK
 --behavior-test: blocked because LM Studio API at 127.0.0.1:1234 refused connection
@@ -135,7 +147,7 @@ Still needs completion after this chat:
 
 - run behavior test after LM Studio server is started;
 - visually smoke-test the Tkinter UI from the live launcher;
-- commit as `012 add file intake handoff and chat polish`;
+- commit the second update, suggested message: `013 add icon buttons and file drop`;
 - push `main` to GitHub.
 
 ## Key Files

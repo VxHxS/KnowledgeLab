@@ -125,7 +125,7 @@ sequenceDiagram
 
 | Component | Role |
 | --- | --- |
-| Chat UI | Messenger-style Tkinter app with left chat history, row-level rename/delete, settings, full-icon Obsidian button, lower-left composer tools, cancel and timeout protection |
+| Chat UI | Messenger-style Tkinter app with left chat history, row-level rename/delete, settings, full-icon Obsidian button, muted-blue icon states for composer tools, native Windows file drop, cancel and timeout protection |
 | Conversation Store | Local JSON sessions with messages, warnings, timestamps, and current chat |
 | Intent Router | Treats all input as normal chat first, then activates save/RAG/diagnostic capabilities when appropriate |
 | Direct LM Studio Adapter | Checks `/v1/models`, validates loaded model IDs, and sends plain chat directly to `/v1/chat/completions` |
@@ -156,7 +156,7 @@ sequenceDiagram
 - Big maintenance buttons stay out of the chat. Reindexing and deeper checks belong in LightRAG-Control.
 - Web search is a small lower-left composer toggle: when enabled, the chat fetches search snippets and passes them into the LLM as temporary context without opening a browser for the user.
 - LightRAG is local-only. It does not crawl or search the web by itself; it can use web content only after the page/video/source is saved, parsed/transcribed, and indexed into the local vault.
-- Images, text files, documents, audio, video, and generic files can be attached from the chat as Markdown intake notes. The current step stores source path, topic guess, metadata, and extracted text for lightweight sources; heavier sources are queued for OCR/ASR/document processing and later reindexing. The original large file is not copied into the vault by default.
+- Images, text files, documents, audio, video, and generic files can be attached from the chat or dropped onto the chat window as Markdown intake notes. The current step stores source path, topic guess, metadata, and extracted text for lightweight sources; heavier sources are queued for OCR/ASR/document processing and later reindexing. The original large file is not copied into the vault by default.
 - Voice input is a composer-side helper. It uses Windows Speech Recognition when available and inserts recognized text into the input field instead of auto-sending.
 - Obsidian opens through the right-edge icon. If the app cannot be found, the user can select `Obsidian.exe` or open the Obsidian website.
 - Game Guard does not run at Windows startup by default. It samples GPU load a few seconds after the chat opens and warns only on sustained load.

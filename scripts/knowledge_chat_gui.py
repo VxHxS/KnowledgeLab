@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import datetime as dt
 import html
 import json
@@ -35,6 +36,10 @@ MATERIAL_QUEUE_PATH = Path(os.getenv("KNOWLEDGELAB_MATERIAL_QUEUE_PATH", str(ROO
 OBSIDIAN_ICON = ROOT / "assets" / "icons" / "Obsidian.png"
 NEW_CHAT_ICON = ROOT / "assets" / "icons" / "new-chat.png"
 WEB_SEARCH_ICON = ROOT / "assets" / "icons" / "web-search.png"
+ATTACHMENT_ICON = ROOT / "assets" / "icons" / "attachment.png"
+ATTACHMENT_ICON_ACTIVE = ROOT / "assets" / "icons" / "attachment-active.png"
+MICROPHONE_ICON = ROOT / "assets" / "icons" / "microphone.png"
+MICROPHONE_ICON_ACTIVE = ROOT / "assets" / "icons" / "microphone-active.png"
 LMSTUDIO_API_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 DEFAULT_LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
 DEFAULT_EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
@@ -411,9 +416,11 @@ class MiniToolButton(tk.Canvas):
     def __init__(
         self,
         parent: tk.Widget,
-        icon: str,
         command,
         *,
+        image: tk.PhotoImage | None = None,
+        active_image: tk.PhotoImage | None = None,
+        fallback_icon: str = "attachment",
         size: int = 30,
         background: str = "#ffffff",
     ) -> None:
@@ -427,10 +434,13 @@ class MiniToolButton(tk.Canvas):
             cursor="hand2",
             takefocus=True,
         )
-        self.icon = icon
+        self.image = image
+        self.active_image = active_image or image
+        self.fallback_icon = fallback_icon
         self.command = command
         self.size = size
         self.background = background
+        self.active = False
         self.hover = False
         self.pressed = False
         self.bind("<Enter>", self.on_enter)
@@ -452,6 +462,10 @@ class MiniToolButton(tk.Canvas):
         return result
 
     config = configure
+
+    def set_active(self, value: bool) -> None:
+        self.active = bool(value)
+        self.redraw()
 
     def on_enter(self, _event: tk.Event | None = None) -> None:
         self.hover = True
@@ -483,12 +497,16 @@ class MiniToolButton(tk.Canvas):
     def redraw(self) -> None:
         self.delete("all")
         disabled = str(self.cget("state")) == "disabled"
-        bg = "#edf3fb" if self.pressed else ("#f6f8fb" if self.hover else self.background)
-        outline = "#c7d2de" if self.hover or self.pressed else self.background
-        icon = "#9aa5b1" if disabled else "#384655"
+        active_visual = (self.active or self.pressed) and not disabled
+        bg = "#e8f0f8" if active_visual else ("#f6f8fb" if self.hover else self.background)
+        outline = "#a8bed6" if active_visual else ("#c7d2de" if self.hover else self.background)
+        icon = "#9aa5b1" if disabled else ("#4f78a8" if active_visual else "#384655")
         self.create_rectangle(0, 0, self.size, self.size, fill=self.background, outline="")
         self.rounded_rect(1, 1, self.size - 1, self.size - 1, 8, fill=bg, outline=outline)
-        if self.icon == "microphone":
+        image = self.active_image if active_visual else self.image
+        if image:
+            self.create_image(self.size // 2, self.size // 2, image=image)
+        elif self.fallback_icon == "microphone":
             self.draw_microphone(icon)
         else:
             self.draw_attachment(icon)
@@ -1334,6 +1352,9 @@ def run_static_self_test() -> int:
         failures.append("LightRAG status intent was not recognized")
     if not is_russian_language_request("на русском пж"):
         failures.append("Russian language preference was not recognized")
+    for asset in (ATTACHMENT_ICON, ATTACHMENT_ICON_ACTIVE, MICROPHONE_ICON, MICROPHONE_ICON_ACTIVE):
+        if not asset.exists() or asset.stat().st_size <= 0:
+            failures.append(f"missing tool icon asset: {asset}")
     expected_kinds = {
         "shot.png": "image_capture",
         "notes.md": "text_file",
@@ -1414,6 +1435,10 @@ class KnowledgeChatApp:
         self.obsidian_image: tk.PhotoImage | None = None
         self.new_chat_image: tk.PhotoImage | None = None
         self.web_search_image: tk.PhotoImage | None = None
+        self.attachment_image: tk.PhotoImage | None = None
+        self.attachment_active_image: tk.PhotoImage | None = None
+        self.microphone_image: tk.PhotoImage | None = None
+        self.microphone_active_image: tk.PhotoImage | None = None
         self.chat_widgets: list[tk.Widget] = []
         self.chat_row_widgets: list[tk.Widget] = []
         self.inline_rename_entry: tk.Entry | None = None
@@ -1427,9 +1452,13 @@ class KnowledgeChatApp:
         self.busy = False
         self.operation_id = 0
         self.active_operation_id: int | None = None
+        self.voice_operation_id: int | None = None
         self.busy_timer_id: str | None = None
         self.game_guard_warning_until = 0.0
         self.query_timeout_seconds = int(os.getenv("LMSTUDIO_GUI_QUERY_TIMEOUT_SECONDS", "600"))
+        self.drop_wndproc = None
+        self.drop_old_wndprocs: dict[int, object] = {}
+        self.drop_call_window_proc = None
 
         self.chat_store = self.load_chat_store()
         self.active_chat_id = str(self.chat_store.get("active_chat_id") or "")
@@ -1874,6 +1903,10 @@ class KnowledgeChatApp:
         self.root.rowconfigure(1, weight=1)
         self.new_chat_image = self.load_icon_image(NEW_CHAT_ICON, 22)
         self.web_search_image = self.load_icon_image(WEB_SEARCH_ICON, 26)
+        self.attachment_image = self.load_icon_image(ATTACHMENT_ICON, 21)
+        self.attachment_active_image = self.load_icon_image(ATTACHMENT_ICON_ACTIVE, 21)
+        self.microphone_image = self.load_icon_image(MICROPHONE_ICON, 21)
+        self.microphone_active_image = self.load_icon_image(MICROPHONE_ICON_ACTIVE, 21)
 
         toolbar = ttk.Frame(self.root, padding=(14, 10), style="Top.TFrame")
         toolbar.grid(row=0, column=0, sticky="ew")
@@ -2017,10 +2050,26 @@ class KnowledgeChatApp:
         self.web_search_button = WebSearchToggleButton(tool_strip, self.toggle_web_search, image=self.web_search_image, width=46, height=30, background="#ffffff")
         self.web_search_button.grid(row=0, column=0, sticky="w", padx=(8, 4), pady=(0, 8))
         self.add_tooltip(self.web_search_button, "Включить/выключить web-поиск для LLM.")
-        self.file_attach_button = MiniToolButton(tool_strip, "attachment", self.attach_files, size=30, background="#ffffff")
+        self.file_attach_button = MiniToolButton(
+            tool_strip,
+            self.attach_files,
+            image=self.attachment_image,
+            active_image=self.attachment_active_image,
+            fallback_icon="attachment",
+            size=30,
+            background="#ffffff",
+        )
         self.file_attach_button.grid(row=0, column=1, sticky="w", padx=4, pady=(0, 8))
         self.add_tooltip(self.file_attach_button, "Прикрепить файл: изображение, текст, документ, аудио или видео.")
-        self.voice_button = MiniToolButton(tool_strip, "microphone", self.start_voice_input, size=30, background="#ffffff")
+        self.voice_button = MiniToolButton(
+            tool_strip,
+            self.start_voice_input,
+            image=self.microphone_image,
+            active_image=self.microphone_active_image,
+            fallback_icon="microphone",
+            size=30,
+            background="#ffffff",
+        )
         self.voice_button.grid(row=0, column=2, sticky="w", padx=4, pady=(0, 8))
         self.add_tooltip(self.voice_button, "Диктовка через Windows Speech Recognition. Текст вставится в поле ввода.")
         self.input.bind("<Control-Return>", self.on_ctrl_return)
@@ -2042,6 +2091,7 @@ class KnowledgeChatApp:
         self.cancel_button.configure(state="disabled")
         self.clear_button = self.create_action_button(button_bar, "Очистить окно", self.clear_chat_window, bg="#dfe6ed", active_bg="#d2dbe4", fg="#1f2933")
         self.clear_button.grid(row=0, column=2, sticky="ew", padx=(7, 0), ipady=7)
+        self.install_native_file_drop()
 
     def create_action_button(self, parent: tk.Widget, text: str, command, *, bg: str, active_bg: str, fg: str) -> RoundedButton:
         return RoundedButton(parent, text=text, command=command, bg=bg, active_bg=active_bg, fg=fg)
@@ -2084,6 +2134,67 @@ class KnowledgeChatApp:
             return image
         except tk.TclError:
             return None
+
+    def install_native_file_drop(self) -> None:
+        if os.name != "nt":
+            return
+        try:
+            self.root.update_idletasks()
+            shell32 = ctypes.windll.shell32
+            user32 = ctypes.windll.user32
+            lresult = ctypes.c_ssize_t
+            wndproc_type = ctypes.WINFUNCTYPE(lresult, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p)
+            self.drop_wndproc = wndproc_type(self.native_file_drop_wndproc)
+            self.drop_call_window_proc = user32.CallWindowProcW
+            self.drop_call_window_proc.restype = lresult
+            self.drop_call_window_proc.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+            self.drop_shell32 = shell32
+            for widget in (self.root, self.chat, self.input):
+                self.register_native_drop_widget(widget)
+        except Exception:
+            self.drop_wndproc = None
+            self.drop_old_wndprocs.clear()
+
+    def register_native_drop_widget(self, widget: tk.Widget) -> None:
+        hwnd = int(widget.winfo_id())
+        if not hwnd or hwnd in self.drop_old_wndprocs or not self.drop_wndproc:
+            return
+        user32 = ctypes.windll.user32
+        set_window_long = user32.SetWindowLongPtrW if ctypes.sizeof(ctypes.c_void_p) == 8 else user32.SetWindowLongW
+        set_window_long.restype = ctypes.c_void_p
+        set_window_long.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+        old_proc = set_window_long(ctypes.c_void_p(hwnd), -4, ctypes.cast(self.drop_wndproc, ctypes.c_void_p))
+        self.drop_old_wndprocs[hwnd] = old_proc
+        ctypes.windll.shell32.DragAcceptFiles(ctypes.c_void_p(hwnd), True)
+
+    def native_file_drop_wndproc(self, hwnd, msg, wparam, lparam):
+        if msg == 0x0233:
+            files = self.files_from_hdrop(wparam)
+            if files:
+                self.root.after(0, self.handle_dropped_files, files)
+            return 0
+        old_proc = self.drop_old_wndprocs.get(int(hwnd) if hwnd else 0)
+        if old_proc and self.drop_call_window_proc:
+            return self.drop_call_window_proc(old_proc, hwnd, msg, wparam, lparam)
+        return 0
+
+    def files_from_hdrop(self, hdrop) -> list[str]:
+        shell32 = ctypes.windll.shell32
+        shell32.DragQueryFileW.restype = ctypes.c_uint
+        shell32.DragQueryFileW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_wchar_p, ctypes.c_uint]
+        shell32.DragFinish.argtypes = [ctypes.c_void_p]
+        files: list[str] = []
+        try:
+            count = shell32.DragQueryFileW(hdrop, 0xFFFFFFFF, None, 0)
+            for index in range(count):
+                length = shell32.DragQueryFileW(hdrop, index, None, 0)
+                buffer = ctypes.create_unicode_buffer(length + 1)
+                shell32.DragQueryFileW(hdrop, index, buffer, length + 1)
+                if buffer.value:
+                    files.append(buffer.value)
+        finally:
+            shell32.DragFinish(hdrop)
+        return files
 
     def apply_settings_to_ui(self) -> None:
         self.enter_send_var.set(bool(self.settings["send_on_enter"]))
@@ -2671,9 +2782,16 @@ class KnowledgeChatApp:
         self.input.focus_set()
 
     def start_voice_input(self) -> None:
+        if self.voice_operation_id is not None and self.busy:
+            self.cancel_active_operation()
+            return
         if self.busy:
             return
         operation_id = self.begin_operation("Listening...", VOICE_INPUT_SECONDS + 5)
+        self.voice_operation_id = operation_id
+        self.set_tool_button_active("voice_button", True)
+        if hasattr(self, "voice_button"):
+            self.voice_button.configure(state="normal")
         threading.Thread(target=self.voice_input_worker, args=(operation_id,), daemon=True).start()
 
     def voice_input_worker(self, operation_id: int) -> None:
@@ -2724,6 +2842,8 @@ try {{
     def finish_voice_input(self, operation_id: int, text: str, error: str) -> None:
         if not self.is_active_operation(operation_id):
             return
+        self.voice_operation_id = None
+        self.set_tool_button_active("voice_button", False)
         if text.strip():
             self.append_to_input(text)
             final_status = "Voice inserted"
@@ -2731,6 +2851,15 @@ try {{
             self.append_warning_message(error, persist=False)
             final_status = "Ready"
         self.set_busy(False, final_status)
+
+    def set_tool_button_active(self, name: str, value: bool) -> None:
+        button = getattr(self, name, None)
+        if button and hasattr(button, "set_active"):
+            button.set_active(value)
+
+    def flash_tool_button(self, name: str, milliseconds: int = 850) -> None:
+        self.set_tool_button_active(name, True)
+        self.root.after(milliseconds, lambda: self.set_tool_button_active(name, False))
 
     def toggle_web_search(self) -> None:
         if self.busy:
@@ -2960,15 +3089,32 @@ try {{
     def attach_files(self, title: str = "Выберите материалы", filetypes=None) -> None:
         if self.busy:
             return
-        files = filedialog.askopenfilenames(
-            title=title,
-            filetypes=filetypes or SUPPORTED_FILETYPES,
-            parent=self.root,
-        )
+        self.set_tool_button_active("file_attach_button", True)
+        try:
+            files = filedialog.askopenfilenames(
+                title=title,
+                filetypes=filetypes or SUPPORTED_FILETYPES,
+                parent=self.root,
+            )
+        finally:
+            self.set_tool_button_active("file_attach_button", False)
         if not files:
             return
+        self.process_attached_files(files, source_title="Файлы:")
+
+    def handle_dropped_files(self, files: list[str]) -> None:
+        if self.busy:
+            self.append_warning_message("Сейчас идет операция. Дождитесь завершения и перетащите файлы еще раз.", persist=False)
+            return
+        self.flash_tool_button("file_attach_button")
+        self.process_attached_files(files, source_title="Перетащенные файлы:")
+
+    def process_attached_files(self, files, source_title: str = "Файлы:") -> None:
+        file_list = [str(file_name) for file_name in files if str(file_name).strip()]
+        if not file_list:
+            return
         caption = self.input_text()
-        route_seed = " ".join([caption] + [Path(file_name).name for file_name in files[:4]]).strip()
+        route_seed = " ".join([caption] + [Path(file_name).name for file_name in file_list[:4]]).strip()
         suggested_route = self.selected_route(route_seed)
         route = self.choose_capture_context(suggested_route)
         if not route:
@@ -2977,8 +3123,9 @@ try {{
         saved: list[str] = []
         extracted_count = 0
         errors: list[str] = []
-        user_lines = ["Файлы:"]
-        for file_name in files:
+        queued_processing_count = 0
+        user_lines = [source_title]
+        for file_name in file_list:
             source_path = Path(file_name)
             if not source_path.exists():
                 errors.append(f"{source_path.name}: файл не найден")
@@ -2988,6 +3135,8 @@ try {{
                 saved.append(rel_path)
                 if extraction_status in {"extracted", "partial"}:
                     extracted_count += 1
+                else:
+                    queued_processing_count += 1
                 user_lines.append(f"- {source_path.name} ({file_kind_label(kind)})")
             except Exception as exc:
                 errors.append(f"{source_path.name}: {exc}")
@@ -3005,8 +3154,8 @@ try {{
             if extracted_count:
                 self.launch_reindex(route)
                 message += "\nДля файлов с уже извлеченным текстом запустил обновление LightRAG в фоне."
-            else:
-                message += "\nOCR/ASR/документ-парсинг помечены как следующие importer-шаги."
+            if queued_processing_count:
+                message += "\nOCR/ASR/документ-парсинг поставлены в очередь importer-шагов; после извлечения текста материал можно будет добавить в LightRAG."
             self.append_assistant_message(message, lightrag_used=False)
         if errors:
             self.append_warning_message("Не удалось сохранить часть файлов:\n" + "\n".join(errors), persist=False)
@@ -3443,6 +3592,9 @@ try {{
     def cancel_active_operation(self) -> None:
         if not self.busy:
             return
+        if self.voice_operation_id == self.active_operation_id:
+            self.voice_operation_id = None
+            self.set_tool_button_active("voice_button", False)
         self.terminate_active_process()
         self.set_busy(False, "Ready")
         self.status_var.set("Canceled")
@@ -3458,7 +3610,7 @@ try {{
         if hasattr(self, "file_attach_button"):
             self.file_attach_button.configure(state=state)
         if hasattr(self, "voice_button"):
-            self.voice_button.configure(state=state)
+            self.voice_button.configure(state="normal" if self.voice_operation_id is not None else state)
         if not busy:
             self.cancel_busy_timer()
             self.set_active_process(None)
