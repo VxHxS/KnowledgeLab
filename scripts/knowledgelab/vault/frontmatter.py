@@ -5,17 +5,18 @@ import re
 from pathlib import Path
 from typing import Any
 
+from knowledgelab.config import VAULT_DIR, LAYER_ACTIVE, LAYER_FINISHED_PROJECTS
 from knowledgelab.utils.text import slugify
+from knowledgelab.utils.urls import normalize_source_url_for_match
 
 
-FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.DOTALL)
 WEB_PROJECT_SLUGS = {"web", "web-dev", "web-development", "frontend", "front-end"}
 ACTIVE_LAYER = "active"
 FINISHED_PROJECTS_LAYER = "finished-projects"
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    match = FRONTMATTER_RE.match(text)
+    match = re.match(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", text, re.DOTALL)
     if not match:
         return {}, text
 
@@ -37,7 +38,21 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
             value = raw_value.strip("\"'")
         meta[key] = value
 
-    return meta, text[match.end() :]
+    return meta, text[match.end():]
+
+
+def parse_basic_frontmatter(text: str) -> dict[str, str]:
+    match = re.match(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", text, re.DOTALL)
+    if not match:
+        return {}
+    meta: dict[str, str] = {}
+    for raw_line in match.group(1).splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        key, raw_value = line.split(":", 1)
+        meta[key.strip().lower()] = raw_value.strip().strip("\"'")
+    return meta
 
 
 def infer_scope(rel_path: str, meta: dict[str, Any]) -> str:
@@ -97,79 +112,39 @@ def infer_layer(rel_path: str, meta: dict[str, Any]) -> str:
     return ACTIVE_LAYER
 
 
-def value_matches(value: str, expected: str) -> bool:
-    if not expected:
-        return True
-    return slugify(value) == slugify(expected)
-
-
-def should_include_document(rel_path: str, text: str) -> bool:
-    meta, body = parse_frontmatter(text)
-    include_filter = os.getenv("LMSTUDIO_INCLUDE", "").strip().lower()
-    scope_filter = os.getenv("LMSTUDIO_SCOPE", "all").strip().lower()
-    project_filter = os.getenv("LMSTUDIO_PROJECT", "").strip()
-    layer_filter = os.getenv("LMSTUDIO_LAYER", ACTIVE_LAYER).strip().lower() or ACTIVE_LAYER
-
-    exclude_flag = str(meta.get("lightrag_exclude", "")).strip().lower()
-    index_flag = str(meta.get("index", "")).strip().lower()
-    if exclude_flag in {"1", "true", "yes"} or index_flag in {"0", "false", "no"}:
-        return False
-
-    searchable = f"{rel_path}\n{body}".lower()
-    if include_filter and include_filter not in searchable:
-        return False
-
-    scope = infer_scope(rel_path, meta)
-    if scope_filter not in ("", "all", "*") and scope != scope_filter:
-        return False
-
-    layer = infer_layer(rel_path, meta)
-    if layer_filter not in ("", "all", "*") and layer != layer_filter:
-        return False
-
-    if project_filter and not value_matches(infer_project(rel_path, meta), project_filter):
-        return False
-
-    return True
-
-
-def collect_markdown_documents(vault_dir: Path) -> list[dict[str, str]]:
-    docs: list[dict[str, str]] = []
-    for path in sorted(vault_dir.rglob("*.md")):
-        rel = path.relative_to(vault_dir).as_posix()
-        lowered_parts = {part.lower() for part in path.relative_to(vault_dir).parts}
-        if ".obsidian" in lowered_parts or "_templates" in lowered_parts:
+def find_existing_source_note(url: str, layer: str, scope: str, project: str) -> str:
+    target = normalize_source_url_for_match(url)
+    if not target or not VAULT_DIR.exists():
+        return ""
+    wanted_project = slugify(project) if project else ""
+    for path in VAULT_DIR.rglob("*.md"):
+        if not path.is_file():
             continue
-
-        text = path.read_text(encoding="utf-8-sig")
-        if not should_include_document(rel, text):
+        try:
+            rel_path = path.relative_to(VAULT_DIR).as_posix()
+            meta = parse_basic_frontmatter(path.read_text(encoding="utf-8-sig", errors="replace"))
+        except (OSError, UnicodeError, ValueError):
             continue
+        meta_url = meta.get("normalized_source_url", "") or meta.get("source_url", "")
+        if normalize_source_url_for_match(meta_url) != target:
+            continue
+        from knowledgelab.routing.topics import infer_note_layer_from_path, infer_note_scope_from_path
 
-        meta, _ = parse_frontmatter(text)
-        scope = infer_scope(rel, meta)
-        project = infer_project(rel, meta)
-        layer = infer_layer(rel, meta)
-        project_section = infer_project_section(rel, meta)
-        header = [
-            f"# Source: {rel}",
-            f"Source scope: {scope}",
-            f"Source layer: {layer}",
-        ]
-        if project_section:
-            header.append(f"Source project section: {project_section}")
-        if project:
-            header.append(f"Source project: {project}")
+        if infer_note_layer_from_path(rel_path, meta) != layer:
+            continue
+        if layer != LAYER_FINISHED_PROJECTS:
+            if scope not in {"", "all"} and infer_note_scope_from_path(rel_path, meta) != scope:
+                continue
+            note_project = slugify(meta.get("project", "")) if meta.get("project") else ""
+            if wanted_project and note_project and note_project != wanted_project:
+                continue
+        return rel_path
+    return ""
 
-        docs.append(
-            {
-                "path": str(path),
-                "rel": rel,
-                "text": "\n".join(header) + "\n\n" + text,
-                "scope": scope,
-                "project": project,
-                "layer": layer,
-                "project_section": project_section,
-            }
-        )
 
-    return docs
+def note_metadata(rel_path: str, vault_dir: Path = VAULT_DIR) -> dict[str, str]:
+    try:
+        path = vault_dir / rel_path
+        return parse_basic_frontmatter(path.read_text(encoding="utf-8-sig", errors="replace"))
+    except Exception:
+        return {}
