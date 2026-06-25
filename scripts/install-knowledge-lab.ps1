@@ -333,14 +333,14 @@ function Test-PythonImports {
     if (-not (Test-Path -LiteralPath $VenvPython)) { return }
     $code = @"
 import importlib.util
-modules = ['tkinter', 'lightrag', 'openai', 'numpy', 'tiktoken', 'yt_dlp', 'telethon']
+modules = ['tkinter', 'tkinterdnd2', 'lightrag', 'openai', 'numpy', 'tiktoken', 'yt_dlp', 'telethon']
 missing = [name for name in modules if importlib.util.find_spec(name) is None]
 print('missing=' + ','.join(missing))
 "@
     try {
         $result = Invoke-Capture $VenvPython @("-c", $code) 30
         if ($result.ExitCode -eq 0 -and $result.StdOut -match "missing=$") {
-            Add-Check "Python imports" "OK" "tkinter, LightRAG, OpenAI, numpy, tiktoken, yt-dlp, Telethon"
+            Add-Check "Python imports" "OK" "tkinter, tkinterdnd2, LightRAG, OpenAI, numpy, tiktoken, yt-dlp, Telethon"
         } else {
             Add-Check "Python imports" "INCOMPLETE" $result.StdOut
             Add-ManualStep "Install missing Python packages: .\LightRAG\.venv\Scripts\python.exe -m pip install -r requirements-all.txt"
@@ -555,11 +555,11 @@ function Install-DesktopLaunchers {
         Add-Check "Desktop icons" "OK" "$chatIcon; $controlIcon"
     }
 
-    Add-Check "Desktop launchers" "WRITE" "$DesktopDir (LightRAG-Chat.lnk, LightRAG-Control.lnk only)"
+    Add-Check "Desktop launchers" "WRITE" "$DesktopDir (LightRAG-Chat.lnk only)"
     if (-not $DryRun) {
         New-Item -ItemType Directory -Force -Path $DesktopDir | Out-Null
 
-        $keep = @("LightRAG-Chat.lnk", "LightRAG-Control.lnk")
+        $keep = @("LightRAG-Chat.lnk")
         $extraFiles = @(Get-ChildItem -LiteralPath $DesktopDir -Force | Where-Object { $_.Name -notin $keep })
         if ($extraFiles.Count -gt 0) {
             $archiveDir = Join-Path $DesktopLogicDir ("Desktop-archive-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
@@ -579,13 +579,6 @@ function Install-DesktopLaunchers {
             -Arguments @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $chatTarget) `
             -WorkingDirectory $Root `
             -IconPath $chatIcon
-
-        New-DesktopShortcut `
-            -ShortcutPath (Join-Path $DesktopDir "LightRAG-Control.lnk") `
-            -TargetPath $powershellExe `
-            -Arguments @("-STA", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $controlTarget) `
-            -WorkingDirectory $Root `
-            -IconPath $controlIcon
     }
 }
 

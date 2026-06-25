@@ -2,7 +2,10 @@ $ErrorActionPreference = "Continue"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$Lab = "C:\MyFiles\KnowledgeLab"
+$ControlDir = Join-Path $PSScriptRoot "LightRAG-Control"
+. (Join-Path $ControlDir "Resolve-LightRAG-Paths.ps1")
+$paths = Get-LightRAGPaths -StartDir $PSScriptRoot
+$Lab = $paths.Root
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Вопрос к общей базе знаний" -ForegroundColor Cyan

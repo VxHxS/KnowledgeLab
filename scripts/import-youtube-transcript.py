@@ -9,26 +9,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from knowledgelab.config import ROOT, VAULT_DIR
+from knowledgelab.utils.text import clean_filename, compact_whitespace, yaml_quote
 from vault_sources import slugify
-
-
-ROOT = Path(__file__).resolve().parents[1]
-VAULT_DIR = ROOT / "Obsidian-Test-Vault"
-
-
-def yaml_quote(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
-def clean_filename(value: str) -> str:
-    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", value).strip()
-    value = re.sub(r"\s+", " ", value)
-    return value[:140].strip(" .-") or "youtube"
-
-
-def compact_whitespace(value: str) -> str:
-    return re.sub(r"\s+", " ", value).strip()
 
 
 def load_yt_dlp() -> Any:

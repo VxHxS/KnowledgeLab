@@ -54,6 +54,18 @@ def find_artifact_dir(workspace: Path) -> Path:
     return workspace
 
 
+def find_serveable_dir(workspace: Path) -> Path:
+    """Find the best directory to serve: artifact with index.html, or workspace root."""
+    for name in ("index.html", "index.htm"):
+        if (workspace / name).exists():
+            return workspace
+    for subdir in ("dist", "build", "out", ".next"):
+        candidate = workspace / subdir
+        if candidate.is_dir() and any((candidate / n).exists() for n in ("index.html", "index.htm")):
+            return candidate
+    return workspace
+
+
 def has_static_entry(path: Path) -> bool:
     return any((path / name).exists() for name in ("index.html", "index.htm"))
 
@@ -81,8 +93,8 @@ def detect_project_stack(workspace: Path) -> dict[str, object]:
             "server_command": command_for_package_manager(manager, server_script) if server_script else [],
             "artifact_path": str(find_artifact_dir(workspace)),
         }
-    artifact = find_artifact_dir(workspace)
-    if has_static_entry(artifact) or has_static_entry(workspace):
+    serveable = find_serveable_dir(workspace)
+    if has_static_entry(serveable):
         return {
             "kind": "static",
             "package_manager": "",
@@ -90,7 +102,7 @@ def detect_project_stack(workspace: Path) -> dict[str, object]:
             "install_command": [],
             "build_command": [],
             "server_command": [],
-            "artifact_path": str(artifact if has_static_entry(artifact) else workspace),
+            "artifact_path": str(serveable),
         }
     return {
         "kind": "unknown",

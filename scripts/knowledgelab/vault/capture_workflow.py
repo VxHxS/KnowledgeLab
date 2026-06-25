@@ -20,7 +20,7 @@ from knowledgelab.utils.urls import (
 from knowledgelab.utils.paths import normalize_attached_source_path
 from knowledgelab.routing.intent import infer_kind, infer_topic
 from knowledgelab.routing.topics import classify_material_topic as _classify_material_topic, ensure_topic_exists as _ensure_topic_exists
-from knowledgelab.vault.frontmatter import find_existing_source_note
+from knowledgelab.vault.frontmatter import find_existing_source_note, find_existing_file_capture
 from knowledgelab.vault.capture import (
     unique_path, capture_destination, render_capture_markdown,
     render_github_capture_markdown, render_reference_link_markdown,
@@ -475,7 +475,29 @@ class CaptureWorkflow:
         if not route:
             self.app.append_warning_message("Сохранение файлов отменено.", persist=False)
             return
+        duplicates: list[tuple[str, list[dict[str, str]]]] = []
+        skip_set: set[str] = set()
+        for file_name in file_list:
+            source_path = Path(file_name)
+            if not source_path.exists():
+                continue
+            existing = find_existing_file_capture(str(source_path), route.layer, route.scope, route.project)
+            if existing:
+                duplicates.append((source_path.name, existing))
+        if duplicates:
+            from knowledgelab.ui.dialogs import ask_duplicate_resolution
+            resolution = ask_duplicate_resolution(self.app.root, duplicates)
+            if resolution == "cancel":
+                self.app.append_warning_message("Импорт отменён: пользователь отменил из-за дубликатов.", persist=False)
+                return
+            if resolution == "skip":
+                dup_names = {name for name, _ in duplicates}
+                file_list = [f for f in file_list if Path(f).name not in dup_names]
+                if not file_list:
+                    self.app.append_warning_message("Все файлы уже были импортированы ранее. Ничего не сохранено.", persist=False)
+                    return
         saved: list[str] = []
+        saved_original_names: list[str] = []
         extracted_count = 0
         errors: list[str] = []
         queued_processing_count = 0
@@ -510,6 +532,7 @@ class CaptureWorkflow:
                     self.app.add_project_action_notes(action_id, [rel_path for rel_path, _kind, _status, _file_path in folder_results])
                     for rel_path, kind, extraction_status, file_path in folder_results:
                         saved.append(rel_path)
+                        saved_original_names.append(file_path.name)
                         meta = self.app.note_metadata(rel_path)
                         routing_reports.append(MaterialRoutingReport(file_path.name, kind, meta.get("topic", "") or "Unsorted", rel_path))
                         if kind in {"book_photo", "book_page_photo", "bookshelf_photo"}:
@@ -525,6 +548,7 @@ class CaptureWorkflow:
                     continue
                 rel_path, kind, extraction_status = self.app.save_file_capture(source_path, caption, route)
                 saved.append(rel_path)
+                saved_original_names.append(source_path.name)
                 meta = self.app.note_metadata(rel_path)
                 routing_reports.append(MaterialRoutingReport(source_path.name, kind, meta.get("topic", "") or "Unsorted", rel_path))
                 if kind in {"book_photo", "book_page_photo", "bookshelf_photo", "image_capture"} and source_path.suffix.lower() in IMAGE_EXTENSIONS:
@@ -545,26 +569,21 @@ class CaptureWorkflow:
         if saved:
             self.app.append_user_message("\n".join(user_lines))
             self.app.clear_input()
-            message = (
-                "Сохранил file-intake в Obsidian:\n"
-                + "\n".join(f"- {path}" for path in saved)
-                + "\n\nОригиналы не копируются в vault: в заметках сохранены путь, метаданные и легкий извлеченный текст, где это возможно."
-                + f"\nОчередь обработки обновлена: {self.app.material_queue_display_path()}."
-            )
-            if folder_file_count:
-                message += f"\nПапки раскрыты в ссылки на отдельные файлы: {folder_file_count}. Сама папка в vault не копировалась."
-            if folder_limit_reached:
-                message += f"\nСканирование папки остановлено на лимите {FOLDER_FILE_SCAN_LIMIT} файлов; служебные директории вроде .git/node_modules/build пропущены."
+            display_names = saved_original_names[:5] if saved_original_names else [Path(p).stem[:20] for p in saved[:5]]
+            message = f"Сохранил {len(saved)} файл(ов)."
+            if display_names:
+                message += "\n" + ", ".join(display_names)
+                if len(saved) > 5:
+                    message += f" и ещё {len(saved) - 5}"
             if extracted_count:
                 from knowledgelab.material.queue import launch_reindex
                 launch_reindex(route)
-                message += "\nДля файлов с уже извлеченным текстом запустил обновление LightRAG в фоне."
             if queued_processing_count:
-                message += "\nOCR/ASR/документ-парсинг поставлены в очередь importer-шагов; после извлечения текста материал можно будет добавить в LightRAG."
+                message += "\nНекоторые файлы требуют обработки (OCR/парсинг)."
             if book_discovery_count:
-                message += f"\nЗапустил фоновый поиск книг для {book_discovery_count} изображений. Можно продолжать общаться; статус этой задачи будет доступен в следующих ответах."
+                message += f"\nИщу книги на {book_discovery_count} изображениях..."
             if video_analysis_count:
-                message += f"\nЗапустил анализ видео для {video_analysis_count} файл(ов): transcript/ASR и кадры с кодом/слайдами будут обработаны в фоне."
+                message += f"\nАнализирую видео ({video_analysis_count} файлов)..."
             self.app.append_assistant_message(message, lightrag_used=False, project_action_id=project_action_ids[0] if project_action_ids else "")
             self.app.append_material_routing_report(routing_reports)
         if errors:

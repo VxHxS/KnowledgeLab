@@ -5,9 +5,10 @@ from pathlib import Path
 from lightrag.constants import DEFAULT_ENTITY_TYPES, DEFAULT_SUMMARY_LANGUAGE
 from lightrag.prompt import PROMPTS
 from openai import AsyncOpenAI
+from knowledgelab.config import ROOT
 
 
-ROOT = Path(__file__).resolve().parents[1]
+
 NOTE_PATH = ROOT / "Obsidian-Test-Vault" / "10 Programming" / "Unity Workflow Notes.md"
 BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
 API_KEY = os.getenv("LMSTUDIO_API_KEY", "lm-studio")

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from knowledgelab.config import ROOT, RLM_QUEUE_PATH, VIDEO_PROCESSING_DIR, VIDEO_FRAME_LIMIT, DEFAULT_SETTINGS
-from knowledgelab.models import KnowledgeRoute, BookDiscoveryReport, VideoAnalysisReport
+from knowledgelab.models import KnowledgeRoute, VideoAnalysisReport
 from knowledgelab.utils.text import now_iso
 from knowledgelab.material.youtube import build_youtube_sync_command
 from knowledgelab.material.web import fetch_article_material, extract_reference_links_from_html
@@ -20,10 +20,7 @@ from knowledgelab.material.queue import (
     run_background_material_command, launch_reindex,
     build_rlm_context_profile, queue_rlm_item,
 )
-from knowledgelab.vision.book_discovery import (
-    lookup_book_catalog, enrich_detected_books, save_detected_book_notes,
-    call_bookshelf_vision, update_bookshelf_note_result,
-)
+from knowledgelab.vision.book_pipeline import process_book_image
 
 if TYPE_CHECKING:
     from main import KnowledgeChatApp
@@ -149,68 +146,46 @@ class MaterialWorkerManager:
 
     def auto_process_book_image_worker(self, image_path: str, rel_path: str, kind: str, caption: str, route: KnowledgeRoute, task_id: str = "") -> None:
         """Background book detection from image."""
-        result: dict[str, list[dict[str, object]]]
-        created_notes: list[str] = []
         should_update_parent = kind in {"book_photo", "book_page_photo", "bookshelf_photo"}
         try:
-            if task_id:
-                self.app.update_background_task(task_id, detail="vision model is reading visible book text")
-            result = call_bookshelf_vision(Path(image_path), kind, caption)
-            if task_id:
-                self.app.update_background_task(task_id, detail="catalog lookup is matching detected books")
-            enriched_books, lookup_unresolved = enrich_detected_books(result.get("detected_books", []))
-            result["detected_books"] = enriched_books
-            result.setdefault("unresolved", []).extend(lookup_unresolved)
-            created_notes = save_detected_book_notes(result.get("detected_books", []), rel_path, image_path)
-            should_update_parent = should_update_parent or bool(result.get("detected_books")) or bool(result.get("unresolved"))
-            if should_update_parent:
-                update_bookshelf_note_result(rel_path, result, created_notes)
+            vision_model, vision_ready, loaded_models = self.app.vision_model_state()
+            pipeline_result = process_book_image(
+                image_path=Path(image_path),
+                rel_path=rel_path,
+                kind=kind,
+                caption=caption,
+                route=route,
+                settings=getattr(self.app, "settings", DEFAULT_SETTINGS),
+                vault_dir=self.app.vault_dir(),
+                vision_model=vision_model,
+                vision_ready=vision_ready,
+                loaded_models=loaded_models,
+                base_url=self.app.lmstudio_base_url(),
+                timeout=min(self.app.query_timeout_seconds, 240),
+                update_parent=should_update_parent,
+                on_status=(lambda detail: self.app.update_background_task(task_id, detail=detail)) if task_id else None,
+            )
+            report = pipeline_result.report
+            has_book_outcome = bool(report.added or report.needs_clarification or report.not_found)
+            if pipeline_result.parent_note_updated or pipeline_result.created_notes:
                 launch_reindex(route)
-                added = [book for book in result.get("detected_books", []) if book.get("vault_note")]
-                needs = [book for book in result.get("detected_books", []) if not book.get("vault_note")]
-                report = BookDiscoveryReport(rel_path, added, needs, result.get("unresolved", []))
-                if task_id:
-                    self.app.update_background_task(
-                        task_id,
-                        status="done",
-                        result=f"added={len(added)}; needs_clarification={len(needs)}; not_found={len(report.not_found)}",
-                    )
+            if task_id:
+                task_status = "done" if pipeline_result.status == "done" else "failed"
+                self.app.update_background_task(
+                    task_id,
+                    status=task_status,
+                    result=(
+                        f"added={len(report.added)}; "
+                        f"needs_clarification={len(report.needs_clarification)}; "
+                        f"not_found={len(report.not_found)}"
+                    ),
+                )
+            if should_update_parent or has_book_outcome:
                 self.app.root.after(0, self.app.append_book_discovery_report, report)
         except Exception as exc:
-            if not should_update_parent:
-                result = {
-                    "detected_books": [],
-                    "unresolved": [
-                        {
-                            "region": "",
-                            "reason": "vision processing failed",
-                            "evidence": str(exc),
-                        }
-                    ],
-                }
-                report = BookDiscoveryReport(rel_path, [], [], result["unresolved"])
-                if task_id:
-                    self.app.update_background_task(task_id, status="failed", result=str(exc))
-                self.app.root.after(0, self.app.append_book_discovery_report, report)
-                return
-            result = {
-                "detected_books": [],
-                "unresolved": [
-                    {
-                        "region": "",
-                        "reason": "vision processing failed",
-                        "evidence": str(exc),
-                    }
-                ],
-            }
-            try:
-                update_bookshelf_note_result(rel_path, result, created_notes, str(exc))
-            except Exception:
-                pass
-            report = BookDiscoveryReport(rel_path, [], [], result["unresolved"])
             if task_id:
                 self.app.update_background_task(task_id, status="failed", result=str(exc))
-            self.app.root.after(0, self.app.append_book_discovery_report, report)
+            self.app.root.after(0, self.app.append_warning_message, f"Book image processing failed: {exc}", False)
 
     def start_auto_book_image_processing(self, image_path: Path, rel_path: str, kind: str, caption: str, route: KnowledgeRoute, *, quiet_generic: bool = False) -> bool:
         """Start background book image processing."""

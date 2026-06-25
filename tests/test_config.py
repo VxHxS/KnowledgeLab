@@ -14,6 +14,10 @@ def test_vault_dir_is_path():
     assert isinstance(config.VAULT_DIR, Path)
 
 
+def test_lmstudio_default_url_matches_lm_studio_local_server():
+    assert config.LMSTUDIO_API_URL == "http://127.0.0.1:1234/v1"
+
+
 def test_default_settings_keys():
     assert isinstance(config.DEFAULT_SETTINGS, dict)
     expected = {
@@ -24,6 +28,10 @@ def test_default_settings_keys():
         "llm_model",
         "vision_model",
         "book_lookup_enabled",
+        "book_download_enabled",
+        "book_download_max_mb",
+        "book_download_formats",
+        "book_legal_sources",
         "auto_route_topics",
         "auto_create_topics",
         "response_language",

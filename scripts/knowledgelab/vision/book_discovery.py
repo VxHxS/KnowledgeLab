@@ -475,8 +475,22 @@ def render_book_note_markdown(book: dict[str, object], source_rel_path: str, sou
     page_count = str(book.get("page_count") or "").strip()
     edition_count = str(book.get("edition_count") or "").strip()
     lookup_reason = str(book.get("lookup_reason") or "").strip()
+    download_status = str(book.get("download_status") or "not_attempted").strip()
+    download_reason = str(book.get("download_reason") or "").strip()
+    download_source = str(book.get("download_source") or "").strip()
+    download_url = str(book.get("download_url") or "").strip()
+    local_file_rel_path = str(book.get("local_file_rel_path") or "").strip()
+    download_file_name = str(book.get("download_file_name") or "").strip()
+    download_format = str(book.get("download_format") or "").strip()
+    download_size_bytes = str(book.get("download_size_bytes") or "").strip()
     book_topic = str(book.get("book_topic") or classify_book_topic(book)).strip()
-    tags = ["library/book", f"topic/{slugify(book_topic)}", f"discovery/{slugify(status)}", f"lookup/{slugify(lookup_status)}"]
+    tags = [
+        "library/book",
+        f"topic/{slugify(book_topic)}",
+        f"discovery/{slugify(status)}",
+        f"lookup/{slugify(lookup_status)}",
+        f"download/{slugify(download_status)}",
+    ]
     frontmatter = [
         "---",
         "type: book",
@@ -512,6 +526,14 @@ def render_book_note_markdown(book: dict[str, object], source_rel_path: str, sou
         f"publisher: {yaml_quote(publisher)}",
         f"page_count: {yaml_quote(page_count)}",
         f"edition_count: {yaml_quote(edition_count)}",
+        f"download_status: {yaml_quote(download_status)}",
+        f"download_reason: {yaml_quote(download_reason)}",
+        f"download_source: {yaml_quote(download_source)}",
+        f"download_url: {yaml_quote(download_url)}",
+        f"local_file_rel_path: {yaml_quote(local_file_rel_path)}",
+        f"download_file_name: {yaml_quote(download_file_name)}",
+        f"download_format: {yaml_quote(download_format)}",
+        f"download_size_bytes: {yaml_quote(download_size_bytes)}",
         f"source_image_path: {yaml_quote(source_image_path)}",
         f"parent_note: {yaml_quote(source_rel_path)}",
         f"captured_at: {yaml_quote(now_iso())}",
@@ -538,6 +560,9 @@ def render_book_note_markdown(book: dict[str, object], source_rel_path: str, sou
         f"- Publisher: {publisher or 'unknown'}",
         f"- Page count: {page_count or 'unknown'}",
         f"- Topic: {book_topic}",
+        f"- Download status: {download_status}",
+        f"- Download source: {download_source or 'none'}",
+        f"- Local file: {local_file_rel_path or 'not downloaded'}",
         f"- Visible title: {visible_title or title}",
         f"- Visible author: {visible_author or author or 'unknown'}",
         f"- Shelf region: {region or 'unknown'}",
@@ -558,6 +583,18 @@ def render_book_note_markdown(book: dict[str, object], source_rel_path: str, sou
         "## Lookup Notes",
         "",
         lookup_reason or "_No lookup issue reported._",
+        "",
+    ])
+    frontmatter.extend([
+        "## Download",
+        "",
+        f"- Status: {download_status}",
+        f"- Reason: {download_reason or 'No download issue reported.'}",
+        f"- Source: {download_source or 'none'}",
+        f"- URL: {download_url or 'none'}",
+        f"- Local file: {local_file_rel_path or 'not downloaded'}",
+        f"- Format: {download_format or 'unknown'}",
+        f"- Size bytes: {download_size_bytes or 'unknown'}",
         "",
     ])
     if lookup_errors:
@@ -609,11 +646,14 @@ def render_bookshelf_detection_section(result: dict[str, list[dict[str, object]]
             status = str(book.get("status") or "")
             confidence = book.get("confidence", 0.0)
             lookup_status = str(book.get("lookup_status") or "not_attempted")
+            download_status = str(book.get("download_status") or "not_attempted")
+            local_file = str(book.get("local_file_rel_path") or "")
             catalog_url = str(book.get("catalog_url") or "")
             book_topic = str(book.get("book_topic") or classify_book_topic(book))
             suffix = f" -> [[{note}]]" if note else ""
             catalog_suffix = f", catalog: {catalog_url}" if catalog_url else ""
-            lines.append(f"- {title}" + (f" - {author}" if author else "") + f" ({book_topic}; {status}, confidence {confidence}, lookup {lookup_status}{catalog_suffix}){suffix}")
+            download_suffix = f", file: {local_file}" if local_file else f", download: {download_status}"
+            lines.append(f"- {title}" + (f" - {author}" if author else "") + f" ({book_topic}; {status}, confidence {confidence}, lookup {lookup_status}{catalog_suffix}{download_suffix}){suffix}")
     else:
         lines.append("- None")
     lines.extend(["", "### Unresolved / Not Found", ""])
@@ -700,57 +740,88 @@ def render_manual_book_resolution_section(entries: list[dict[str, object]], crea
     return "\n".join(lines)
 
 
-def format_material_routing_report(reports: list[MaterialRoutingReport]) -> str:
+def format_material_routing_report(reports: list[MaterialRoutingReport], detail: str = "full") -> str:
     if not reports:
         return ""
     grouped: dict[str, list[MaterialRoutingReport]] = {}
     for report in reports:
         grouped.setdefault(report.topic or "Unsorted", []).append(report)
+    if detail == "compact":
+        topic_parts = [f"{topic} ({len(items)})" for topic, items in sorted(grouped.items())]
+        total = sum(len(items) for items in grouped.values())
+        return f"Сохранено: {total} файл(ов) по темам: {', '.join(topic_parts)}."
     lines = ["Разложено по темам:"]
     for topic, items in sorted(grouped.items()):
-        lines.append(f"- {topic}: {len(items)} материал(ов)")
+        lines.append(f"- {topic}: {len(items)} файл(ов)")
         for item in items[:4]:
-            created = " (новая тема)" if item.created_topic else ""
-            lines.append(f"  - {item.source_name} -> {item.rel_path}{created}")
+            lines.append(f"  - {item.source_name}")
         if len(items) > 4:
             lines.append(f"  - ...и ещё {len(items) - 4}")
     return "\n".join(lines)
 
 
-def format_book_discovery_report(report: BookDiscoveryReport) -> str:
-    lines = [
-        "Отчёт по книгам:",
-        f"- Родительская заметка: {report.parent_note}",
-        f"- Добавлено: {len(report.added)}",
-        f"- Нужно уточнить: {len(report.needs_clarification)}",
-        f"- Не найдено / не прочитано: {len(report.not_found)}",
-    ]
-    if report.added:
-        lines.extend(["", "Добавлено:"])
-        for book in report.added[:8]:
-            title = str(book.get("title") or "Unknown Book")
-            author = str(book.get("author") or "")
-            topic = str(book.get("book_topic") or classify_book_topic(book))
-            note = str(book.get("vault_note") or "")
-            confidence = book.get("confidence", "")
-            lines.append(
-                f"- {title}"
-                + (f" - {author}" if author else "")
-                + f" | topic: {topic} | confidence: {confidence}"
-                + (f" | {note}" if note else "")
-            )
-    if report.needs_clarification:
-        lines.extend(["", "Нужно уточнить:"])
-        for item in report.needs_clarification[:8]:
-            title = str(item.get("title") or item.get("visible_title") or item.get("evidence") or "Unknown")
-            reason = str(item.get("lookup_reason") or item.get("reason") or "not enough visible metadata")
-            lines.append(f"- {title}: {reason}")
-    if report.not_found:
-        lines.extend(["", "Не найдено / не прочитано:"])
-        for item in report.not_found[:8]:
-            reason = str(item.get("reason") or "unreadable")
-            evidence = str(item.get("evidence") or "")
-            lines.append(f"- {reason}" + (f" | видимый текст: {evidence}" if evidence else ""))
+def format_book_discovery_report(report: BookDiscoveryReport, detail: str = "full") -> str:
+    added = report.added
+    needs = report.needs_clarification
+    not_found = report.not_found
+
+    if not added and not needs and not not_found:
+        return "Книги на изображении не обнаружены."
+
+    lines: list[str] = []
+
+    if added:
+        in_vault: list[dict[str, object]] = []
+        new_books: list[dict[str, object]] = []
+
+        for book in added:
+            existing = find_existing_book_note(book)
+            if existing:
+                book["_vault_note"] = existing
+                in_vault.append(book)
+            else:
+                new_books.append(book)
+
+        lines.append(f"Определено книг: {len(added)}")
+        lines.append("")
+
+        index = 1
+        if new_books:
+            for book in new_books[:20]:
+                title = str(book.get("title") or "?")
+                author = str(book.get("author") or "")
+                author_str = f" — {author}" if author else ""
+                lines.append(f"{index}. {title}{author_str}")
+                index += 1
+
+        if in_vault:
+            lines.append("")
+            lines.append(f"Уже в Obsidian ({len(in_vault)}):")
+            for book in in_vault[:20]:
+                title = str(book.get("title") or "?")
+                author = str(book.get("author") or "")
+                author_str = f" — {author}" if author else ""
+                lines.append(f"  ✓ {title}{author_str}")
+
+        if new_books:
+            lines.append("")
+            lines.append(f"Нужны файлы: {len(new_books)} книг. Отправьте .epub, .pdf или .fb2 файлы.")
+
+    if needs:
+        lines.append("")
+        lines.append(f"Не удалось определить ({len(needs)}):")
+        for item in needs[:5]:
+            title = str(item.get("title") or item.get("visible_title") or item.get("evidence") or "?")
+            lines.append(f"  - {title}")
+
+    if not_found:
+        has_vision_error = any("vision" in str(item.get("reason", "")).lower() or "lm studio" in str(item.get("evidence", "")).lower() for item in not_found)
+        if has_vision_error:
+            lines.append("")
+            lines.append("Не распознано: нужна vision-модель в LM Studio (qwen2.5-vl или llava).")
+        elif not added and not needs:
+            lines.append("Не удалось распознать книги на изображении.")
+
     return "\n".join(lines)
 
 
@@ -910,6 +981,57 @@ def enrich_detected_books(books: list[dict[str, object]], book_lookup_enabled: b
                 ),
             })
     return enriched_books, unresolved
+
+
+def web_enrich_books(books: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Search DuckDuckGo for books without confirmed author/title."""
+    from knowledgelab.llm.web_search import fetch_web_search_results
+
+    for book in books:
+        title = str(book.get("title") or "").strip()
+        author = str(book.get("author") or "").strip()
+        if not title:
+            continue
+        if author and len(author) > 2:
+            continue
+
+        query = f"{title} книга автор"
+        try:
+            results = fetch_web_search_results(query, max_results=3, timeout=8)
+        except Exception:
+            continue
+
+        if not results:
+            continue
+
+        combined_text = " ".join(
+            f"{r.get('title', '')} {r.get('snippet', '')}"
+            for r in results
+        ).lower()
+
+        if not author or len(author) <= 2:
+            import re
+            author_patterns = [
+                rf"(?:автор[:\s]+)([А-ЯЁа-яё][а-яё]+ [А-ЯЁа-яё][а-яё]+(?:\s*,\s*[А-ЯЁа-яё][а-яё]+ [А-ЯЁа-яё][а-яё]+)*)",
+                rf"{re.escape(title.lower())}[^.]*?([А-ЯЁ][а-яё]+ [А-ЯЁ][а-яё]+(?:\s+и\s+[А-ЯЁ][а-яё]+ [А-ЯЁ][а-яё]+)*)",
+                r"(?:by|от)\s+([A-Z][a-z]+ [A-Z][a-z]+(?:\s+and\s+[A-Z][a-z]+ [A-Z][a-z]+)*)",
+            ]
+            for pattern in author_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    found_author = match.group(1).strip()
+                    if len(found_author) > 3 and found_author.lower() not in title.lower():
+                        book["author"] = found_author
+                        book["author_source"] = "web_search"
+                        break
+
+        if not str(book.get("isbn") or ""):
+            import re
+            isbn_match = re.search(r"(?:isbn[:\s-]*)?(\d[\d-]{9,16}\d)", combined_text)
+            if isbn_match:
+                book["isbn"] = isbn_match.group(1).replace("-", "")
+
+    return books
 
 
 def save_detected_book_notes(books: list[dict[str, object]], source_rel_path: str, source_image_path: str, vault_dir: Path = VAULT_DIR, allow_unverified: bool = False) -> list[str]:

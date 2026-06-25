@@ -142,11 +142,10 @@ def test_format_material_routing_report_with_items():
     ]
     result = format_material_routing_report(reports)
     assert "React" in result
-    assert "2 материал" in result
+    assert "2 файл" in result
 
 
 def test_format_book_discovery_report_empty():
     report = BookDiscoveryReport("note.md", added=[], needs_clarification=[], not_found=[])
     result = format_book_discovery_report(report)
-    assert "Добавлено: 0" in result
-    assert "Нужно уточнить: 0" in result
+    assert "не обнаружены" in result

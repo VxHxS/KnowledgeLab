@@ -35,18 +35,18 @@ def collect_topic_registry(vault_dir: Path) -> set[str]:
     return topics
 
 
-def topic_note_path(scope: str, topic: str, project: str = "") -> Path:
+def topic_note_path(scope: str, topic: str, project: str = "", vault_dir: Path = VAULT_DIR) -> Path:
     safe_topic = clean_filename(topic or "Unsorted")
     safe_project = slugify(project) if project else ""
     if safe_project and safe_project not in {"web-development", "my-game"}:
-        return VAULT_DIR / "20 Projects" / clean_filename(safe_project) / "Topics" / safe_topic / "_Topic.md"
+        return vault_dir / "20 Projects" / clean_filename(safe_project) / "Topics" / safe_topic / "_Topic.md"
     if scope == "web":
-        return VAULT_DIR / "20 Projects" / "Web Development" / "Topics" / safe_topic / "_Topic.md"
+        return vault_dir / "20 Projects" / "Web Development" / "Topics" / safe_topic / "_Topic.md"
     if scope == "game":
-        return VAULT_DIR / "20 Projects" / "My Game" / "Topics" / safe_topic / "_Topic.md"
+        return vault_dir / "20 Projects" / "My Game" / "Topics" / safe_topic / "_Topic.md"
     if scope == "library":
-        return VAULT_DIR / "50 Library" / "Topics" / safe_topic / "_Topic.md"
-    return VAULT_DIR / "10 General Knowledge" / "Topics" / safe_topic / "_Topic.md"
+        return vault_dir / "50 Library" / "Topics" / safe_topic / "_Topic.md"
+    return vault_dir / "10 General Knowledge" / "Topics" / safe_topic / "_Topic.md"
 
 
 def render_topic_note_markdown(topic: str, scope: str, project: str = "") -> str:
@@ -116,7 +116,7 @@ def ensure_topic_exists(topic: str, scope: str = "general", project: str = "", v
         return False
     if topic in collect_topic_registry(vault_dir):
         return False
-    path = topic_note_path(scope, topic, project)
+    path = topic_note_path(scope, topic, project, vault_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         return False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -8,11 +9,9 @@ import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from vault_sources import infer_project, infer_scope, parse_frontmatter
-
-
-ROOT = Path(__file__).resolve().parents[1]
-VAULT_DIR = ROOT / "Obsidian-Test-Vault"
+from knowledgelab.config import ROOT, VAULT_DIR
+from vault_sources import ACTIVE_LAYER, infer_layer, infer_project, infer_scope, parse_frontmatter
+MATERIAL_QUEUE_PATH = Path(os.getenv("KNOWLEDGELAB_MATERIAL_QUEUE_PATH", str(ROOT / "tmp" / "material-processing-queue.jsonl")))
 YOUTUBE_URL_RE = re.compile(
     r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s<>)\]]+|youtu\.be/[^\s<>)\]]+)",
     re.IGNORECASE,
@@ -191,6 +190,8 @@ def collect_youtube_links(
         meta, body = parse_frontmatter(text)
         if should_skip_note(meta, rel):
             continue
+        if infer_layer(rel, meta) != ACTIVE_LAYER:
+            continue
         if not all_notes and not is_marked_youtube_link_note(meta, rel):
             continue
 
@@ -235,6 +236,35 @@ def transcript_exists(vault_dir: Path, out_dir: str, video_id: str, url: str) ->
     return False
 
 
+def now_iso() -> str:
+    import datetime as dt
+
+    return dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def queue_youtube_asr_fallback(link: dict[str, str], vault_dir: Path, reason: str = "") -> None:
+    MATERIAL_QUEUE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    item = {
+        "queued_at": now_iso(),
+        "source_url": link["url"],
+        "video_id": link.get("video_id", ""),
+        "vault_note": link.get("source_note", ""),
+        "kind": "youtube_asr_fallback",
+        "scope": link.get("scope", "general"),
+        "project": link.get("project", ""),
+        "layer": ACTIVE_LAYER,
+        "status": "queued",
+        "transcript_status": "pending_asr",
+        "frame_analysis_status": "queued_video_analysis",
+        "out_dir": link.get("out_dir", ""),
+        "vault_dir": str(vault_dir),
+        "failure_reason": reason,
+        "planned_processing": "download audio and transcribe with local ASR when a transcription worker is available",
+    }
+    with MATERIAL_QUEUE_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+
 def run_import(link: dict[str, str], vault_dir: Path, overwrite: bool) -> int:
     if not overwrite and transcript_exists(vault_dir, link["out_dir"], link["video_id"], link["url"]):
         print(f"Already synced YouTube transcript: {link['url']}")
@@ -260,7 +290,14 @@ def run_import(link: dict[str, str], vault_dir: Path, overwrite: bool) -> int:
 
     print(f"Sync YouTube: {link['url']}")
     print(f"Source note: {link['source_note']}")
-    return subprocess.call(command, cwd=str(ROOT))
+    result = subprocess.run(command, cwd=str(ROOT), text=True, encoding="utf-8", errors="replace", capture_output=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    if result.returncode != 0:
+        queue_youtube_asr_fallback(link, vault_dir, (result.stderr or result.stdout).strip()[:600])
+    return result.returncode
 
 
 def parse_args() -> argparse.Namespace:

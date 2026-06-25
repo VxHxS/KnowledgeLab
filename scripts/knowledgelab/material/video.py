@@ -52,18 +52,30 @@ def parse_video_frame_response(text: str) -> dict[str, object]:
         return {}
 
 
-def format_video_analysis_report(report: VideoAnalysisReport) -> str:
-    lines = [
-        "Отчёт по видео:",
-        f"- Родительская заметка: {report.parent_note}",
-        f"- Analysis note: {report.analysis_note}",
-        f"- Transcript: {report.transcript_status}",
-        f"- Frames: {report.frame_analysis_status}",
-        f"- Кадров обработано: {report.frame_count}",
-        f"- Code/text snippets: {report.code_snippet_count}",
-    ]
-    if report.warning:
-        lines.append(f"- Внимание: {report.warning}")
+def format_video_analysis_report(report: VideoAnalysisReport, detail: str = "full") -> str:
+    if detail == "compact":
+        if report.frame_count:
+            parts = [f"Обработано кадров: {report.frame_count}"]
+            if report.code_snippet_count:
+                parts.append(f"фрагментов кода: {report.code_snippet_count}")
+            return "Видео: " + ", ".join(parts) + "."
+        if report.warning:
+            return f"Видео: {report.warning}"
+        return "Анализ видео запущен."
+    lines: list[str] = []
+    if report.frame_count:
+        lines.append(f"Анализ видео завершён.")
+        lines.append(f"Обработано кадров: {report.frame_count}")
+        if report.code_snippet_count:
+            lines.append(f"Найдено фрагментов кода/текста: {report.code_snippet_count}")
+        if report.analysis_note:
+            lines.append(f"Заметка: {report.analysis_note}")
+    elif report.warning:
+        lines.append(f"Анализ видео: {report.warning}")
+    else:
+        lines.append("Анализ видео запущен. Результат появится через несколько секунд.")
+    if report.transcript_status and report.transcript_status != "pending_asr":
+        lines.append(f"Транскрипт: {report.transcript_status}")
     return "\n".join(lines)
 
 

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from knowledgelab.routing.topics import builtin_topic_names, render_topic_note_markdown
+from knowledgelab.routing.topics import (
+    builtin_topic_names,
+    ensure_topic_exists,
+    render_topic_note_markdown,
+    topic_note_path,
+)
 
 
 def test_builtin_topic_names_non_empty():
@@ -40,3 +45,10 @@ def test_render_topic_note_markdown_has_project():
 def test_render_topic_note_markdown_has_timestamp():
     result = render_topic_note_markdown("CSS", "web")
     assert "created_at:" in result
+
+
+def test_ensure_topic_exists_uses_passed_vault(tmp_path):
+    created = ensure_topic_exists("Custom Topic", "general", "", tmp_path)
+    expected = topic_note_path("general", "Custom Topic", "", tmp_path)
+    assert created is True
+    assert expected.exists()

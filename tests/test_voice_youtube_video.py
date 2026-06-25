@@ -8,11 +8,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 from knowledgelab.llm.voice import build_voice_recognition_script, friendly_voice_error
 from knowledgelab.material.youtube import build_youtube_sync_command
+from knowledgelab.material.queue import launch_reindex, launch_reindex_command
 from knowledgelab.material.video import (
     video_source_id, video_runtime_dir, parse_video_frame_response,
     format_video_analysis_report,
 )
-from knowledgelab.models import VideoAnalysisReport
+from knowledgelab.models import KnowledgeRoute, VideoAnalysisReport
 
 
 class TestVoiceModule:
@@ -67,6 +68,37 @@ class TestYoutubeModule:
         assert "--project" not in cmd
 
 
+class TestMaterialQueueModule:
+    def test_launch_reindex_command_includes_route(self):
+        route = KnowledgeRoute("Web", "web", "web-development")
+        cmd = launch_reindex_command(route)
+        assert "ingest-vault-scope-lmstudio.ps1" in " ".join(cmd)
+        assert "-Scope" in cmd
+        assert "web" in cmd
+        assert "-Project" in cmd
+        assert "web-development" in cmd
+
+    def test_launch_reindex_starts_process_with_environment(self, monkeypatch):
+        route = KnowledgeRoute("General", "general", "")
+        calls: dict[str, object] = {}
+
+        def fake_popen(command, **kwargs):
+            calls["command"] = command
+            calls["kwargs"] = kwargs
+            return object()
+
+        import subprocess
+
+        monkeypatch.setenv("KNOWLEDGELAB_TEST_ENV", "1")
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+        launch_reindex(route)
+
+        assert calls["command"]
+        env = calls["kwargs"]["env"]
+        assert env["KNOWLEDGELAB_TEST_ENV"] == "1"
+
+
 class TestVideoModule:
     def test_video_source_id_deterministic(self):
         id1 = video_source_id("https://youtube.com/watch?v=abc")
@@ -110,10 +142,9 @@ class TestVideoModule:
             warning="test warning",
         )
         text = format_video_analysis_report(report)
-        assert "test.md" in text
         assert "5" in text
         assert "2" in text
-        assert "test warning" in text
+        assert "analysis.md" in text
 
     def test_format_report_no_warning(self):
         report = VideoAnalysisReport(

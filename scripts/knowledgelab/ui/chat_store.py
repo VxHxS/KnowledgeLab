@@ -131,13 +131,32 @@ def load_chat_store() -> dict:
         try:
             data = json.loads(CHAT_STORE_PATH.read_text(encoding="utf-8"))
             if isinstance(data, dict) and isinstance(data.get("chats"), list):
+                data["chats"] = _dedupe_chats(data["chats"])
                 return data
         except (OSError, json.JSONDecodeError):
             pass
     migrated = migrate_legacy_history()
     if migrated:
+        migrated["chats"] = _dedupe_chats(migrated.get("chats", []))
         return migrated
     return {"version": 1, "active_chat_id": "", "chats": []}
+
+
+def _dedupe_chats(chats: list[dict]) -> list[dict]:
+    """Remove duplicate chats and limit to max 25."""
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for chat in chats:
+        chat_id = str(chat.get("id", ""))
+        title = str(chat.get("title", ""))
+        messages = chat.get("messages", [])
+        key = f"{title}|{len(messages)}"
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(chat)
+    unique.sort(key=lambda c: str(c.get("updated_at", "")), reverse=True)
+    return unique[:25]
 
 
 def save_chat_store(data: dict) -> None:

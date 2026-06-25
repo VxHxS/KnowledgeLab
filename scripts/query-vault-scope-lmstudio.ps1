@@ -1,6 +1,8 @@
 ﻿param(
     [ValidateSet("all", "general", "game", "web")]
     [string] $Scope = "all",
+    [ValidateSet("active", "finished-projects")]
+    [string] $Layer = "active",
     [string] $Project = "",
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]] $QuestionParts
@@ -10,11 +12,47 @@ $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
+function Get-KnowledgeLabShortName {
+    param(
+        [string] $Value,
+        [int] $MaxLength = 48
+    )
+
+    $name = ($Value -replace "[^A-Za-z0-9_-]+", "-").Trim("-")
+    if (-not $name) { $name = "default" }
+    if ($name.Length -le $MaxLength) { return $name }
+
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($name)
+        $hashBytes = $sha.ComputeHash($bytes)
+    }
+    finally {
+        if ($sha) { $sha.Dispose() }
+    }
+    $hash = -join ($hashBytes[0..5] | ForEach-Object { $_.ToString("x2") })
+    $prefixLength = [Math]::Max(8, $MaxLength - 13)
+    return ("{0}-{1}" -f $name.Substring(0, [Math]::Min($prefixLength, $name.Length)), $hash)
+}
+
 $Root = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $Root "LightRAG\.venv\Scripts\python.exe"
 $SafeProject = $Project.Trim().ToLower() -replace "[^a-z0-9_-]+", "-"
 if (-not $SafeProject) { $SafeProject = "default" }
-$StorageName = if ($Scope -eq "all") { "all" } elseif ($Scope -eq "game") { "game_$SafeProject" } else { $Scope }
+$SafeProject = Get-KnowledgeLabShortName $SafeProject 48
+$StorageName = if ($Layer -eq "finished-projects") {
+    "finished_projects"
+} elseif ($Scope -eq "all") {
+    "all"
+} elseif ($Scope -eq "web" -and $SafeProject -notin @("default", "web-development")) {
+    "web_$SafeProject"
+} elseif ($Scope -eq "game") {
+    "game_$SafeProject"
+} elseif ($Scope -eq "general" -and $SafeProject -ne "default") {
+    "general_$SafeProject"
+} else {
+    $Scope
+}
 $StorageRel = "LightRAG\rag_storage_$StorageName"
 $StoragePath = Join-Path $Root $StorageRel
 $Question = ($QuestionParts -join " ").Trim()
@@ -84,13 +122,15 @@ function Start-AutoIndex {
     param(
         [string] $StorageName,
         [string] $Scope,
+        [string] $Layer,
         [string] $Project
     )
 
     $tmpDir = Join-Path $Root "tmp"
-    $pidPath = Join-Path $tmpDir "auto-index-$StorageName.pid"
-    $logPath = Join-Path $tmpDir "auto-index-$StorageName.log"
-    $errPath = Join-Path $tmpDir "auto-index-$StorageName.err.log"
+    $runName = Get-KnowledgeLabShortName $StorageName 48
+    $pidPath = Join-Path $tmpDir "ai-$runName.pid"
+    $logPath = Join-Path $tmpDir "ai-$runName.log"
+    $errPath = Join-Path $tmpDir "ai-$runName.err.log"
     New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
 
     if (Test-AutoIndexRunning $pidPath) {
@@ -105,9 +145,11 @@ function Start-AutoIndex {
         "-File",
         $ingestScript,
         "-Scope",
-        $Scope
+        $Scope,
+        "-Layer",
+        $Layer
     )
-    if ($Scope -in @("game", "web") -and $Project) {
+    if ($Project) {
         $args += @("-Project", $Project)
     }
 
@@ -124,12 +166,13 @@ function Start-AutoIndex {
 
 $env:PYTHONUTF8 = "1"
 $env:LMSTUDIO_SCOPE = $Scope
-$env:LMSTUDIO_PROJECT = if ($Scope -in @("game", "web")) { $Project } else { "" }
+$env:LMSTUDIO_PROJECT = if ($Project) { $Project } else { "" }
+$env:LMSTUDIO_LAYER = $Layer
 $env:LMSTUDIO_RAG_DIR = $StorageRel
 
 if ($UseLightRag -and -not (Test-Path -LiteralPath (Join-Path $StoragePath "vdb_chunks.json"))) {
     if ($AutoIndexMissing) {
-        $autoIndexState = Start-AutoIndex -StorageName $StorageName -Scope $Scope -Project $Project
+        $autoIndexState = Start-AutoIndex -StorageName $StorageName -Scope $Scope -Layer $Layer -Project $Project
         if ($autoIndexState -eq "started") {
             Write-KnowledgeWarning "LightRAG индекс для '$Scope' еще не готов; я запустил сборку в фоне. Этот ответ будет создан без базы знаний, следующие ответы подключат LightRAG после завершения."
         } else {

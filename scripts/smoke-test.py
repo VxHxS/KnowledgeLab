@@ -9,10 +9,10 @@ from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.utils import wrap_embedding_func_with_attrs
 
 from local_tokenizer import LOCAL_TOKENIZER
+from knowledgelab.config import ROOT, VAULT_DIR
 
 
-ROOT = Path(__file__).resolve().parents[1]
-VAULT_DIR = ROOT / "Obsidian-Test-Vault"
+
 WORKING_DIR = ROOT / "LightRAG" / "rag_storage_smoke"
 
 

@@ -12,7 +12,7 @@ from tkinter import ttk
 from typing import TYPE_CHECKING
 
 from knowledgelab.utils.text import now_iso
-from knowledgelab.routing.project_stack import detect_project_stack
+from knowledgelab.routing.project_stack import detect_project_stack, has_static_entry, find_serveable_dir
 from knowledgelab.tasks.project_actions import find_free_port
 
 if TYPE_CHECKING:
@@ -139,14 +139,30 @@ class ProjectActionPanel:
             env = dict(os.environ)
             env["PORT"] = str(port)
             framework = str(stack.get("framework") or "")
+            kind = str(stack.get("kind") or "")
             server_command = [str(item) for item in stack.get("server_command", [])]
             if server_command:
                 command = list(server_command)
                 if framework == "vite" and "dev" in command:
                     command.extend(["--", "--host", "127.0.0.1", "--port", str(port)])
+            elif kind == "static":
+                artifact_path = str(stack.get("artifact_path") or workspace)
+                serve_dir = find_serveable_dir(Path(artifact_path))
+                if not has_static_entry(serve_dir):
+                    raise RuntimeError(
+                        "Проект не содержит index.html. Невозможно запустить локальный сервер.\n"
+                        f"Проверьте директорию: {serve_dir}"
+                    )
+                cwd = serve_dir
+                command = [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"]
             else:
                 artifact = Path(str(stack.get("artifact_path") or workspace))
                 cwd = artifact if artifact.exists() else workspace
+                if not has_static_entry(cwd):
+                    raise RuntimeError(
+                        "Проект не содержит index.html и не имеет скрипта dev/start в package.json.\n"
+                        f"Невозможно запустить локальный сервер для: {cwd}"
+                    )
                 command = [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"]
             out_path, err_path = self.app.action_command_log_paths(action_id, "server")
             with out_path.open("a", encoding="utf-8") as stdout, err_path.open("a", encoding="utf-8") as stderr:

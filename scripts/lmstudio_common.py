@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 import numpy as np
-from knowledgelab.config import ROOT, VAULT_DIR, LOCAL_RUNTIME_SYSTEM_PROMPT
+from knowledgelab.config import ROOT, VAULT_DIR, LOCAL_RUNTIME_SYSTEM_PROMPT, LMSTUDIO_API_URL
 from lightrag.llm.openai import openai_complete
 from lightrag.utils import wrap_embedding_func_with_attrs
 from openai import AsyncOpenAI
@@ -14,7 +14,7 @@ DEFAULT_WORKING_DIR = ROOT / "LightRAG" / "rag_storage_lmstudio"
 WORKING_DIR = Path(os.getenv("LMSTUDIO_RAG_DIR", str(DEFAULT_WORKING_DIR)))
 if not WORKING_DIR.is_absolute():
     WORKING_DIR = ROOT / WORKING_DIR
-BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:5000/v1")
+BASE_URL = os.getenv("LMSTUDIO_BASE_URL", LMSTUDIO_API_URL)
 API_KEY = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
 LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
 EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")

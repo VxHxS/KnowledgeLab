@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Callable
 
-from knowledgelab.config import MATERIAL_QUEUE_PATH, RLM_QUEUE_PATH, VIDEO_PROCESSING_DIR
+from knowledgelab.config import MATERIAL_QUEUE_PATH, RLM_QUEUE_PATH, VIDEO_PROCESSING_DIR, WARNING_PREFIX
 from knowledgelab.utils.text import now_iso
 from knowledgelab.vault.capture import extraction_label
 from knowledgelab.material.video import video_source_id
@@ -243,5 +244,5 @@ def launch_reindex(route) -> None:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             env=env,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"{WARNING_PREFIX}launch_reindex failed: {exc}", flush=True)

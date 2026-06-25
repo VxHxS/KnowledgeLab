@@ -22,5 +22,5 @@ if (-not (Test-Path -LiteralPath $Python)) {
     $Python = "python"
 }
 
-$App = Join-Path $Lab "scripts\knowledge_chat_gui.py"
+$App = Join-Path $Lab "scripts\main.py"
 Start-Process -FilePath $Python -ArgumentList @($App) -WorkingDirectory $Lab

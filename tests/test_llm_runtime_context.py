@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from knowledgelab.config import LAYER_ACTIVE
-from knowledgelab.llm.runtime_context import build_runtime_context_prompt
+from knowledgelab.i18n.messages import msg, msg_list
+from knowledgelab.llm.runtime_context import build_runtime_context_prompt, storage_name_for_scope
 from knowledgelab.models import KnowledgeRoute
 
 
@@ -84,3 +85,17 @@ def test_build_runtime_context_prompt_busy():
     )
     assert "Importing files" in result
     assert "task1" in result
+
+
+def test_storage_name_for_scope_shortens_long_project_names():
+    project = "runs-user-pidString-" * 20
+    first = storage_name_for_scope("game", project)
+    second = storage_name_for_scope("game", project)
+    assert first == second
+    assert first.startswith("game_")
+    assert len(first) <= 53
+
+
+def test_message_catalog_loads_runtime_strings():
+    assert "KnowledgeLab Chat" in msg("prompts.local_runtime_system")
+    assert "привет" in msg_list("runtime.ordinary_short_chat_terms")

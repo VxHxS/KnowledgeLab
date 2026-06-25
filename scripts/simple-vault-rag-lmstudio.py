@@ -7,10 +7,10 @@ import numpy as np
 from openai import AsyncOpenAI
 
 from vault_sources import collect_markdown_documents
+from knowledgelab.config import ROOT, VAULT_DIR
 
 
-ROOT = Path(__file__).resolve().parents[1]
-VAULT_DIR = ROOT / "Obsidian-Test-Vault"
+
 BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
 API_KEY = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
 LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")

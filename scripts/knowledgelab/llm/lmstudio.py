@@ -7,6 +7,7 @@ import os
 import urllib.request
 
 from knowledgelab.config import DEFAULT_VISION_MODEL, VISION_MODEL_MARKERS, LOCAL_RUNTIME_SYSTEM_PROMPT
+from knowledgelab.i18n.messages import msg
 
 
 def is_vision_model_name(model: str) -> bool:
@@ -57,43 +58,25 @@ def check_lmstudio_ready(
     except Exception as exc:
         error_detail = str(exc)
         if "10061" in error_detail or "Connection refused" in error_detail:
-            hint = (
-                f"LM Studio server не отвечает на {base_url}.\n\n"
-                "Как исправить:\n"
-                "1. Откройте LM Studio\n"
-                "2. Перейдите в Developer → Local Server\n"
-                "3. Нажмите 'Start Server' или включите переключатель Status\n"
-                f"4. Убедитесь, что порт совпадает: {base_url.split(':')[-1].split('/')[0]}\n\n"
-                "Также можно открыть LightRAG-Control для проверки."
-            )
+            hint = msg("lmstudio.connection_refused", base_url=base_url, port=base_url.split(":")[-1].split("/")[0])
         elif "Timeout" in error_detail or "timed out" in error_detail:
-            hint = (
-                f"LM Studio не отвечает вовремя на {base_url}.\n\n"
-                "Возможные причины:\n"
-                "- Сервер запускается, подождите 10-15 секунд\n"
-                "- Модель загружается, проверьте LM Studio\n"
-                "- Слишком большая нагрузка на GPU"
-            )
+            hint = msg("lmstudio.timeout", base_url=base_url)
         else:
-            hint = (
-                f"LM Studio server не отвечает на {base_url}.\n"
-                f"Детали: {error_detail}\n\n"
-                "Откройте LM Studio → Developer → Local Server и убедитесь, что сервер запущен."
-            )
+            hint = msg("lmstudio.unavailable", base_url=base_url, error_detail=error_detail)
         return False, hint, []
 
     if not require_models:
-        return True, "LM Studio server отвечает.", models
+        return True, msg("lmstudio.server_ok"), models
 
     missing = [model for model in [required_model] if model not in models]
     if missing:
-        loaded = ", ".join(models) if models else "нет загруженных моделей"
+        loaded = ", ".join(models) if models else msg("lmstudio.no_loaded_models")
         return (
             False,
-            f"LM Studio server отвечает, но модель {', '.join(missing)} не загружена. Сейчас загружено: {loaded}. Откройте LightRAG-Control или LM Studio и загрузите модель.",
+            msg("lmstudio.required_model_missing", models=", ".join(missing), loaded=loaded),
             models,
         )
-    return True, "LM Studio готов.", models
+    return True, msg("lmstudio.ready"), models
 
 
 def extract_chat_content(response: dict) -> tuple[str, str]:
@@ -134,11 +117,15 @@ def call_plain_lmstudio(
     model_id: str,
     timeout: int = 120,
     max_tokens: int = 1800,
+    topic_context: str = "",
 ) -> tuple[str, str]:
+    system_content = LOCAL_RUNTIME_SYSTEM_PROMPT
+    if topic_context:
+        system_content = f"{LOCAL_RUNTIME_SYSTEM_PROMPT}\n\n{topic_context}"
     body = {
         "model": model_id,
         "messages": [
-            {"role": "system", "content": LOCAL_RUNTIME_SYSTEM_PROMPT},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": f"/no_think\n\n{question}"},
         ],
         "temperature": 0.2,
@@ -156,18 +143,13 @@ def call_plain_lmstudio(
             body["messages"][0],
             {
                 "role": "user",
-                "content": (
-                    "/no_think\n\n"
-                    "Ответь финальным сообщением без рассуждений. "
-                    "Если вопрос короткий или бытовой, ответь естественно и кратко на русском.\n\n"
-                    f"{question}"
-                ),
+                "content": "/no_think\n\n" + msg("prompts.reasoning_retry_user", question=question),
             },
         ]
         retry = lmstudio_request_json(base_url, "chat/completions", method="POST", payload=retry_body, timeout=min(timeout, 180))
         retry_content, retry_reasoning = extract_chat_content(retry)
         if retry_content:
-            return retry_content, "Первый ответ модели ушел в reasoning-режим; я повторил запрос в plain-режиме."
+            return retry_content, msg("lmstudio.reasoning_retry_warning")
         if retry_reasoning:
-            return "", "Модель рассуждала, но не вернула финальный текст. В LM Studio отключите thinking/reasoning для этой модели или попробуйте другой instruct-моделью."
-    return "", "Модель вернула пустой ответ."
+            return "", msg("lmstudio.reasoning_no_final")
+    return "", msg("lmstudio.empty_response")

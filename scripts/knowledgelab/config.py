@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from knowledgelab.i18n.messages import msg
+
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VAULT_DIR = ROOT / "Obsidian-Test-Vault"
@@ -31,27 +33,19 @@ ATTACHMENT_ICON_ACTIVE = ROOT / "assets" / "icons" / "attachment-active.png"
 MICROPHONE_ICON = ROOT / "assets" / "icons" / "microphone.png"
 MICROPHONE_ICON_ACTIVE = ROOT / "assets" / "icons" / "microphone-active.png"
 
-LMSTUDIO_API_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:5000/v1").rstrip("/")
+LMSTUDIO_API_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1").rstrip("/")
 DEFAULT_LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
 DEFAULT_EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
 DEFAULT_VISION_MODEL = os.getenv("KNOWLEDGELAB_VISION_MODEL", "")
 OPEN_LIBRARY_SEARCH_URL = "https://openlibrary.org/search.json"
 GOOGLE_BOOKS_SEARCH_URL = "https://www.googleapis.com/books/v1/volumes"
+INTERNET_ARCHIVE_ADVANCEDSEARCH_URL = "https://archive.org/advancedsearch.php"
+INTERNET_ARCHIVE_METADATA_URL = "https://archive.org/metadata"
+GUTENDEX_SEARCH_URL = "https://gutendex.com/books/"
 BOOK_LOOKUP_MIN_SCORE = 0.56
 VISION_MODEL_MARKERS = ("vision", "vl", "llava", "moondream", "minicpm", "gemma-3", "pixtral", "qwen2.5-vl", "qwen2-vl", "qwen-vl")
 
-LOCAL_RUNTIME_SYSTEM_PROMPT = (
-    "You are KnowledgeLab Chat, a local-first desktop assistant running inside the user's KnowledgeLab app. "
-    "All model calls are routed through the user's configured local LM Studio OpenAI-compatible server. "
-    "Do not claim you are running through Alibaba Cloud, OpenAI cloud, Anthropic cloud, or any other hosted API unless the user explicitly provides evidence of such a setup. "
-    "If the prompt includes a 'KnowledgeLab runtime context' block, treat it as authoritative app state. "
-    "If asked whether you are connected, where processing is happening, or what the app is doing, including LightRAG, queues, imports, DnD, local servers, book discovery, and video analysis, answer from that runtime context instead of model-provider biography. "
-    "Answer normally and directly in Russian by default. "
-    "Use another language only when the user clearly writes in that language or explicitly asks for it. "
-    "Short ambiguous messages like 'ку', 'ого', '555', or mistyped Russian words must be treated as Russian conversation. "
-    "Do not treat every message as a knowledge-base lookup. "
-    "Do not show reasoning or analysis; provide only the final useful answer."
-)
+LOCAL_RUNTIME_SYSTEM_PROMPT = msg("prompts.local_runtime_system")
 
 LAYER_ACTIVE = "active"
 LAYER_FINISHED_PROJECTS = "finished-projects"
@@ -152,7 +146,12 @@ DEFAULT_SETTINGS = {
     "llm_model": DEFAULT_LLM_MODEL,
     "vision_model": DEFAULT_VISION_MODEL,
     "embedding_model": DEFAULT_EMBEDDING_MODEL,
+    "auto_switch_models": True,
     "book_lookup_enabled": True,
+    "book_download_enabled": True,
+    "book_download_max_mb": 50,
+    "book_download_formats": ["epub", "pdf", "txt"],
+    "book_legal_sources": ["gutenberg", "internet_archive"],
     "auto_route_topics": True,
     "auto_create_topics": True,
     "response_language": "ru",
@@ -162,6 +161,9 @@ DEFAULT_SETTINGS = {
     "auto_process_links": True,
     "auto_detect_books_in_images": True,
     "web_search_enabled": False,
+    "message_detail_level": "compact",
+    "vault_git_auto_sync": False,
+    "vault_git_sync_interval": 300,
 }
 
 WEB_TERMS = {

@@ -13,7 +13,7 @@
 `Chat/RAG client` - слой, которого не хватает в обычном LM Studio Chat. Это скрипт или приложение, которое принимает вопрос, вызывает LightRAG, получает найденный контекст и отправляет его в LM Studio. Сейчас эту роль выполняют:
 
 ```text
-scripts/knowledge_chat_gui.py
+scripts/main.py
 scripts/query-vault-scope-lmstudio.ps1
 scripts/chat-vault-lmstudio.ps1
 desktop-launchers/LightRAG-Chat.cmd

@@ -148,3 +148,44 @@ def note_metadata(rel_path: str, vault_dir: Path = VAULT_DIR) -> dict[str, str]:
         return parse_basic_frontmatter(path.read_text(encoding="utf-8-sig", errors="replace"))
     except Exception:
         return {}
+
+
+def find_existing_file_capture(source_path: str, layer: str, scope: str, project: str) -> list[dict[str, str]]:
+    """Find existing capture notes for a local file or folder by source_path.
+
+    Returns a list of dicts with rel_path, title, captured_at for each match.
+    """
+    if not source_path or not VAULT_DIR.exists():
+        return []
+    normalized = source_path.replace("\\", "/").rstrip("/").lower()
+    wanted_project = slugify(project) if project else ""
+    results: list[dict[str, str]] = []
+    for path in VAULT_DIR.rglob("*.md"):
+        if not path.is_file():
+            continue
+        try:
+            rel_path = path.relative_to(VAULT_DIR).as_posix()
+            meta = parse_basic_frontmatter(path.read_text(encoding="utf-8-sig", errors="replace"))
+        except (OSError, UnicodeError, ValueError):
+            continue
+        meta_source = (meta.get("source_path") or "").replace("\\", "/").rstrip("/").lower()
+        if not meta_source:
+            continue
+        if meta_source != normalized:
+            continue
+        from knowledgelab.routing.topics import infer_note_layer_from_path, infer_note_scope_from_path
+
+        if infer_note_layer_from_path(rel_path, meta) != layer:
+            continue
+        if layer != LAYER_FINISHED_PROJECTS:
+            if scope not in {"", "all"} and infer_note_scope_from_path(rel_path, meta) != scope:
+                continue
+            note_project = slugify(meta.get("project", "")) if meta.get("project") else ""
+            if wanted_project and note_project and note_project != wanted_project:
+                continue
+        results.append({
+            "rel_path": rel_path,
+            "title": meta.get("title", path.stem),
+            "captured_at": meta.get("captured_at", ""),
+        })
+    return results

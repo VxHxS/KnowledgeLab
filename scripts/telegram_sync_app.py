@@ -15,14 +15,15 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 
-ROOT = Path(__file__).resolve().parents[1]
-VAULT_DIR = ROOT / "Obsidian-Test-Vault"
+from knowledgelab.config import ROOT, VAULT_DIR
+from knowledgelab.utils.text import clean_filename, slugify, yaml_quote
+from knowledgelab.utils.urls import URL_RE
+
 SYNC_DIR = ROOT / ".telegram-sync"
 CONFIG_PATH = SYNC_DIR / "telegram_export_sync_config.json"
 DEFAULT_CHAT_NAME = "Unity ресурсы"
 DEFAULT_OUTPUT_DIR = "30 Sources/Telegram"
 DEFAULT_SCOPE = "general"
-URL_RE = re.compile(r"https?://[^\s<>)\]]+", re.IGNORECASE)
 MSG_BLOCK_RE = re.compile(
     r"<!-- tg-msg:(-?\d+) -->\n(.*?)(?=\n<!-- tg-msg:-?\d+ -->|\Z)",
     re.DOTALL,
@@ -33,24 +34,6 @@ MSG_BLOCK_RE = re.compile(
 class TopicInfo:
     topic_id: int | None
     title: str
-
-
-def slugify(value: str) -> str:
-    value = value.strip().lower()
-    value = re.sub(r"[^a-z0-9а-яё_-]+", "-", value, flags=re.IGNORECASE)
-    value = re.sub(r"-{2,}", "-", value).strip("-")
-    return value or "default"
-
-
-def clean_filename(value: str) -> str:
-    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", value).strip()
-    value = re.sub(r"\s+", " ", value)
-    return value[:96].strip(" .-") or "telegram"
-
-
-def yaml_quote(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
 
 
 def read_json(path: Path, default: Any) -> Any:

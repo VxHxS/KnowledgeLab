@@ -40,8 +40,7 @@ Write-Host "LightRAG-Chat runs the automatic GPU warning after the chat window o
 Write-Host "Game Guard is not installed into Windows startup."
 Write-Host ""
 Write-Host "1 - Watch now in this window"
-Write-Host "2 - Remove old startup shortcut and stop background watcher"
-Write-Host "3 - Check once"
+Write-Host "2 - Check once"
 Write-Host ""
 
 $Choice = Read-Host "Choose action [1]"
@@ -49,8 +48,7 @@ if ([string]::IsNullOrWhiteSpace($Choice)) { $Choice = "1" }
 
 Set-Location -LiteralPath $Lab
 switch ($Choice) {
-    "2" { & powershell -NoProfile -ExecutionPolicy Bypass -File $GuardScript -UninstallStartup -StopNow }
-    "3" { & powershell -NoProfile -ExecutionPolicy Bypass -File $GuardScript -Once }
+    "2" { & powershell -NoProfile -ExecutionPolicy Bypass -File $GuardScript -Once }
     default { & powershell -NoProfile -ExecutionPolicy Bypass -File $GuardScript -Watch }
 }
 

@@ -4,6 +4,27 @@ Last updated: 2026-06-13
 
 Use this file to continue the project in a new Codex chat without losing context.
 
+## Update 2026-06-25
+
+Active launcher path was re-verified: `KnowledgeLab-Chat` starts the live install in `C:\MyFiles\KnowledgeLab`.
+
+Recent runtime changes synced to live:
+
+- Russian/user-facing prompt strings for the high-risk LM Studio/runtime path were moved into `scripts\knowledgelab\resources\messages.ru.json`.
+- Code now reads those strings through `scripts\knowledgelab\i18n\messages.py` via `msg(...)` / `msg_list(...)`.
+- Plain greetings such as `Привет` no longer include the hidden KnowledgeLab runtime context in the LLM prompt; runtime context is injected only for status/runtime/LightRAG/model/import-style questions.
+- The chat frame animation is implemented in `scripts\knowledgelab\ui\animated_edges.py` as one moving tapered border segment, inspired by the CodePen-style moving line segment rather than a full glowing border.
+- Message bubbles use the same tapered runner idea in `scripts\knowledgelab\ui\message_bubble.py`.
+- Long LightRAG storage/run names are shortened with a stable SHA suffix so pid/log paths stay short.
+
+Verification after sync:
+
+```text
+active --self-test: OK
+active message catalog smoke: OK
+active hashes match staging for synced runtime files
+```
+
 ## Start Prompt For New Chat
 
 Continue working on the local KnowledgeLab desktop system.
@@ -44,7 +65,7 @@ At the time of this handoff:
 branch: main
 status: main...origin/main [ahead 1]
 local commit not pushed: 09cee23 011 refine chat controls and image intake
-working tree: scripts/knowledge_chat_gui.py has unfinished edits for general file intake
+working tree: scripts/main.py has unfinished edits for general file intake
 ```
 
 Already pushed commits:
@@ -82,7 +103,7 @@ This file completes only the handoff part.
 
 Update from 2026-06-13:
 
-- general file intake was completed in `scripts/knowledge_chat_gui.py`;
+- general file intake was completed in `scripts/main.py`;
 - `IMG` was replaced by a paperclip-style file control;
 - web search moved to the lower-left composer tool row;
 - a microphone control was added; it uses Windows Speech Recognition when available and inserts recognized text into the input field;
@@ -93,7 +114,7 @@ Update from 2026-06-13:
 - startup health hints are redrawn so resolved LM Studio/Obsidian diagnostics do not linger in the empty intro area;
 - `README.md` and `ARCHITECTURE.md` were updated for the new pipeline.
 - selected files were synced to live install `C:\MyFiles\KnowledgeLab`:
-  `scripts\knowledge_chat_gui.py`, `README.md`, `ARCHITECTURE.md`, `NEXT_CHAT_HANDOFF.md`;
+  `scripts\main.py`, `README.md`, `ARCHITECTURE.md`, `NEXT_CHAT_HANDOFF.md`;
 - stale live file `assets\icons\rename-chat.png` was removed to match staging.
 
 Second update from 2026-06-13:
@@ -120,7 +141,7 @@ installer dry-run: OK
 --behavior-test: blocked because LM Studio API at 127.0.0.1:1234 refused connection
 ```
 
-Current partial code edits in `scripts/knowledge_chat_gui.py`:
+Current partial code edits in `scripts/main.py`:
 
 - added `MATERIAL_QUEUE_PATH`;
 - added file extension groups for text/doc/audio/video;
@@ -153,7 +174,7 @@ Still needs completion after this chat:
 ## Key Files
 
 ```text
-scripts\knowledge_chat_gui.py
+scripts\main.py
 scripts\install-knowledge-lab.ps1
 scripts\install_wizard_gui.py
 README.md
@@ -251,25 +272,25 @@ Inspect state:
 
 ```powershell
 git status --short --branch
-git diff -- scripts\knowledge_chat_gui.py README.md ARCHITECTURE.md NEXT_CHAT_HANDOFF.md
+git diff -- scripts\main.py README.md ARCHITECTURE.md NEXT_CHAT_HANDOFF.md
 ```
 
 Run syntax after finishing code edits:
 
 ```powershell
-& "C:\MyFiles\KnowledgeLab\LightRAG\.venv\Scripts\python.exe" -m py_compile scripts\knowledge_chat_gui.py
+& "C:\MyFiles\KnowledgeLab\LightRAG\.venv\Scripts\python.exe" -m py_compile scripts\main.py
 ```
 
 Run app self-test:
 
 ```powershell
-& "C:\MyFiles\KnowledgeLab\LightRAG\.venv\Scripts\python.exe" scripts\knowledge_chat_gui.py --self-test
+& "C:\MyFiles\KnowledgeLab\LightRAG\.venv\Scripts\python.exe" scripts\main.py --self-test
 ```
 
 Run behavior test:
 
 ```powershell
-& "C:\MyFiles\KnowledgeLab\LightRAG\.venv\Scripts\python.exe" scripts\knowledge_chat_gui.py --behavior-test
+& "C:\MyFiles\KnowledgeLab\LightRAG\.venv\Scripts\python.exe" scripts\main.py --behavior-test
 ```
 
 Installer dry-run:

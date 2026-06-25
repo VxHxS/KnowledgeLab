@@ -2,8 +2,11 @@ $ErrorActionPreference = "Continue"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$Lab = "C:\MyFiles\KnowledgeLab"
-$Python = Join-Path $Lab "LightRAG\.venv\Scripts\python.exe"
+$ControlDir = Join-Path $PSScriptRoot "LightRAG-Control"
+. (Join-Path $ControlDir "Resolve-LightRAG-Paths.ps1")
+$paths = Get-LightRAGPaths -StartDir $PSScriptRoot
+$Lab = $paths.Root
+$Python = $paths.Python
 if (-not (Test-Path -LiteralPath $Python)) { $Python = "python" }
 
 Write-Host "========================================" -ForegroundColor Cyan

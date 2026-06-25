@@ -4,7 +4,11 @@ import pytest
 
 from knowledgelab.config import LAYER_ACTIVE, LAYER_FINISHED_PROJECTS
 from knowledgelab.models import (
+    BookCandidate,
     BookDiscoveryReport,
+    BookDownloadResult,
+    BookLookupResult,
+    BookPipelineResult,
     CodePenSnapshot,
     BackgroundTaskRecord,
     KnowledgeRoute,
@@ -87,6 +91,32 @@ def test_book_discovery_report_construction():
     report = BookDiscoveryReport("note.md", added=[], needs_clarification=[], not_found=[])
     assert report.parent_note == "note.md"
     assert report.added == []
+
+
+def test_book_candidate_roundtrip():
+    candidate = BookCandidate.from_book_dict({"title": "Clean Code", "author": "Robert C. Martin", "confidence": 0.9})
+    assert candidate.title == "Clean Code"
+    assert candidate.to_book_dict()["author"] == "Robert C. Martin"
+
+
+def test_book_lookup_result_defaults():
+    result = BookLookupResult("found")
+    assert result.status == "found"
+    assert result.book == {}
+    assert result.candidates == []
+
+
+def test_book_download_result_defaults():
+    result = BookDownloadResult("download_not_available", reason="no legal file")
+    assert result.status == "download_not_available"
+    assert result.local_file_rel_path == ""
+
+
+def test_book_pipeline_result_construction():
+    report = BookDiscoveryReport("note.md", added=[], needs_clarification=[], not_found=[])
+    result = BookPipelineResult("done", {"detected_books": [], "unresolved": []}, [], report)
+    assert result.status == "done"
+    assert result.report is report
 
 
 def test_manual_book_entry_construction():

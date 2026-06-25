@@ -4,13 +4,22 @@ import os
 import sys
 from pathlib import Path
 
-import numpy as np
 from lightrag import LightRAG
 from lightrag.kg.shared_storage import initialize_pipeline_status
-from lightrag.llm.openai import openai_complete
-from lightrag.utils import wrap_embedding_func_with_attrs
-from openai import AsyncOpenAI
 
+from lmstudio_common import (
+    API_KEY,
+    BASE_URL,
+    EMBEDDING_DIM,
+    EMBEDDING_MODEL,
+    LOCAL_RUNTIME_SYSTEM_PROMPT,
+    LLM_MODEL,
+    WORKING_DIR,
+    chat_message_content,
+    embedding_func,
+    lmstudio_complete,
+)
+from openai import AsyncOpenAI
 from lightrag_query_audit import (
     build_bypass_param,
     build_query_param,
@@ -23,18 +32,10 @@ from lightrag_query_audit import (
     require_usable_context,
 )
 from local_tokenizer import LOCAL_TOKENIZER
+from knowledgelab.config import ROOT
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_WORKING_DIR = ROOT / "LightRAG" / "rag_storage_lmstudio"
-WORKING_DIR = Path(os.getenv("LMSTUDIO_RAG_DIR", str(DEFAULT_WORKING_DIR)))
-if not WORKING_DIR.is_absolute():
-    WORKING_DIR = ROOT / WORKING_DIR
-BASE_URL = os.getenv("LMSTUDIO_BASE_URL", "http://127.0.0.1:1234/v1")
-API_KEY = os.getenv("LMSTUDIO_API_KEY", "lm-studio")
-LLM_MODEL = os.getenv("LMSTUDIO_LLM_MODEL", "qwen/qwen3-14b")
-EMBEDDING_MODEL = os.getenv("LMSTUDIO_EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5")
-EMBEDDING_DIM = int(os.getenv("LMSTUDIO_EMBEDDING_DIM", "768"))
+
 LLM_CONTEXT_TOKENS = env_int("LMSTUDIO_CONTEXT_TOKENS", 8192)
 LLM_MAX_RESPONSE_TOKENS = env_int("LMSTUDIO_MAX_RESPONSE_TOKENS", 2048)
 DEFAULT_QUERY_MAX_TOTAL_TOKENS = max(2600, LLM_CONTEXT_TOKENS - LLM_MAX_RESPONSE_TOKENS - 512)
@@ -51,39 +52,11 @@ LIGHTRAG_OFF_REASON = os.getenv(
     "LightRAG отключен: ответ без базы знаний.",
 )
 ENABLE_LLM_CACHE = env_flag("LMSTUDIO_ENABLE_LLM_CACHE", False)
-EMBEDDING_CLIENT = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
 
 
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("lightrag").setLevel(logging.WARNING)
 logging.getLogger("nano-vectordb").setLevel(logging.WARNING)
-
-
-@wrap_embedding_func_with_attrs(embedding_dim=EMBEDDING_DIM, max_token_size=8192)
-async def embedding_func(texts: list[str]) -> np.ndarray:
-    response = await EMBEDDING_CLIENT.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=texts,
-    )
-    return np.array([item.embedding for item in response.data], dtype=np.float32)
-
-
-async def lmstudio_complete(
-    prompt: str,
-    system_prompt: str | None = None,
-    history_messages: list[dict] | None = None,
-    keyword_extraction: bool = False,
-    **kwargs,
-) -> str:
-    if "/no_think" not in prompt:
-        prompt = f"{prompt}\n\n/no_think"
-    return await openai_complete(
-        prompt,
-        system_prompt=system_prompt,
-        history_messages=history_messages,
-        keyword_extraction=keyword_extraction,
-        **kwargs,
-    )
 
 
 def emit_warning(message: str) -> None:
@@ -93,17 +66,6 @@ def emit_warning(message: str) -> None:
         print(f"Note: {message}", file=sys.stderr)
 
 
-def chat_message_content(response) -> str:
-    message = response.choices[0].message
-    content = getattr(message, "content", None)
-    if isinstance(content, str) and content.strip():
-        return content.strip()
-    reasoning = getattr(message, "reasoning_content", None)
-    if isinstance(reasoning, str) and reasoning.strip():
-        return ""
-    return ""
-
-
 def read_question() -> str:
     try:
         return input("\nYou: ").strip()
@@ -111,19 +73,15 @@ def read_question() -> str:
         return "exit"
 
 
-async def plain_lmstudio_answer(question: str) -> str:
+async def plain_lmstudio_answer(question: str) -> tuple[str, str]:
+    """Returns (content, warning). Content is the answer, warning is any reasoning-related message."""
     client = AsyncOpenAI(base_url=BASE_URL, api_key=API_KEY)
     response = await client.chat.completions.create(
         model=LLM_MODEL,
         messages=[
             {
                 "role": "system",
-                "content": (
-                    "You are a helpful general-purpose assistant inside KnowledgeLab Chat. "
-                    "Answer the user's message normally and directly. "
-                    "Do not assume every message is a knowledge-base lookup request. "
-                    "If the user asks for code, writing, translation, brainstorming, or casual conversation, help with that task."
-                ),
+                "content": LOCAL_RUNTIME_SYSTEM_PROMPT,
             },
             {"role": "user", "content": f"/no_think\n\n{question}"},
         ],
@@ -131,7 +89,12 @@ async def plain_lmstudio_answer(question: str) -> str:
         max_tokens=LLM_MAX_RESPONSE_TOKENS,
         stream=False,
     )
-    return chat_message_content(response)
+    content, reasoning = chat_message_content(response)
+    if content:
+        return content, ""
+    if reasoning:
+        return "", "Модель вернула только reasoning-контент. В LM Studio отключите thinking/reasoning для этой модели."
+    return "", "Модель вернула пустой ответ."
 
 
 async def main() -> None:
@@ -145,7 +108,9 @@ async def main() -> None:
                 break
 
             try:
-                response = await plain_lmstudio_answer(question)
+                response, warning = await plain_lmstudio_answer(question)
+                if warning:
+                    emit_warning(warning)
                 if not response:
                     raise RuntimeError("LM Studio returned an empty answer.")
                 if env_flag("LMSTUDIO_WARN_PLAIN_MODE", False):

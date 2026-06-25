@@ -1,4 +1,4 @@
-﻿param(
+param(
     [switch] $SmokeTest
 )
 
@@ -134,7 +134,7 @@ function Update-SystemStatus {
     }
 
     if ($status -match "Server:\s+ON") {
-        Set-StatusLabel $script:ServerStatus "Server: ON :1234" ([System.Drawing.Color]::FromArgb(48, 130, 84))
+        Set-StatusLabel $script:ServerStatus "Server: ON :5000" ([System.Drawing.Color]::FromArgb(48, 130, 84))
     }
     else {
         Set-StatusLabel $script:ServerStatus "Server: OFF" ([System.Drawing.Color]::FromArgb(160, 64, 64))

@@ -10,9 +10,10 @@ from lightrag.llm.ollama import ollama_embed, ollama_model_complete
 from lightrag.utils import wrap_embedding_func_with_attrs
 
 from local_tokenizer import LOCAL_TOKENIZER
+from knowledgelab.config import ROOT
 
 
-ROOT = Path(__file__).resolve().parents[1]
+
 WORKING_DIR = ROOT / "LightRAG" / "rag_storage_core"
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:14b")

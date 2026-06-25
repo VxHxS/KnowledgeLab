@@ -6,9 +6,10 @@ import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import messagebox, ttk
+from knowledgelab.config import ROOT
 
 
-ROOT = Path(__file__).resolve().parents[1]
+
 INSTALLER = ROOT / "scripts" / "install-knowledge-lab.ps1"
 REPORT = ROOT / "INSTALL_REPORT.md"
 LIGHTRAG_GITHUB = "https://github.com/HKUDS/LightRAG"

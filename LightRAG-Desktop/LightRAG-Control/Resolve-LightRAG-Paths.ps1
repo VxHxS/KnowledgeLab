@@ -1,4 +1,4 @@
-﻿function Test-LightRAGRoot {
+function Test-LightRAGRoot {
     param([string] $Path)
 
     if ([string]::IsNullOrWhiteSpace($Path)) {
@@ -57,6 +57,7 @@ function Get-LightRAGRoot {
     while (-not [string]::IsNullOrWhiteSpace($dir)) {
         Add-LightRAGRootCandidate $candidates $dir
         Add-LightRAGRootCandidate $candidates (Join-Path $dir "AI-Knowledge-Lab")
+        Add-LightRAGRootCandidate $candidates (Join-Path $dir "KnowledgeLab")
 
         $parent = Split-Path -Parent $dir
         if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $dir) {
@@ -67,11 +68,14 @@ function Get-LightRAGRoot {
 
     if ($env:USERPROFILE) {
         Add-LightRAGRootCandidate $candidates (Join-Path $env:USERPROFILE "Documents\Freelance\AI-Knowledge-Lab")
+        Add-LightRAGRootCandidate $candidates (Join-Path $env:USERPROFILE "Documents\Freelance\KnowledgeLab")
+        Add-LightRAGRootCandidate $candidates (Join-Path $env:USERPROFILE "MyFiles\KnowledgeLab")
     }
 
     $documents = [Environment]::GetFolderPath("MyDocuments")
     if ($documents) {
         Add-LightRAGRootCandidate $candidates (Join-Path $documents "Freelance\AI-Knowledge-Lab")
+        Add-LightRAGRootCandidate $candidates (Join-Path $documents "Freelance\KnowledgeLab")
     }
 
     foreach ($candidate in $candidates) {

@@ -42,6 +42,10 @@ def load_settings(path: Path = SETTINGS_PATH) -> dict[str, object]:
     settings["auto_create_topics"] = bool(settings.get("auto_create_topics", DEFAULT_SETTINGS["auto_create_topics"]))
     settings["auto_detect_books_in_images"] = bool(settings.get("auto_detect_books_in_images", DEFAULT_SETTINGS["auto_detect_books_in_images"]))
     settings["book_lookup_enabled"] = bool(settings.get("book_lookup_enabled", DEFAULT_SETTINGS["book_lookup_enabled"]))
+    settings["book_download_enabled"] = bool(settings.get("book_download_enabled", DEFAULT_SETTINGS["book_download_enabled"]))
+    settings["book_download_max_mb"] = max(1, int(settings.get("book_download_max_mb", DEFAULT_SETTINGS["book_download_max_mb"]) or DEFAULT_SETTINGS["book_download_max_mb"]))
+    settings["book_download_formats"] = normalize_list_setting(settings.get("book_download_formats"), DEFAULT_SETTINGS["book_download_formats"])
+    settings["book_legal_sources"] = normalize_list_setting(settings.get("book_legal_sources"), DEFAULT_SETTINGS["book_legal_sources"])
     settings["web_search_enabled"] = bool(settings.get("web_search_enabled", DEFAULT_SETTINGS["web_search_enabled"]))
     settings["game_guard_delay_seconds"] = max(1, int(settings.get("game_guard_delay_seconds", 5) or 5))
     settings["button_color"] = valid_hex_color(str(settings.get("button_color", "")), DEFAULT_SETTINGS["button_color"])
@@ -66,6 +70,10 @@ def normalize_settings(settings: dict[str, object]) -> dict[str, object]:
     settings["auto_create_topics"] = bool(settings.get("auto_create_topics", DEFAULT_SETTINGS["auto_create_topics"]))
     settings["auto_detect_books_in_images"] = bool(settings.get("auto_detect_books_in_images", DEFAULT_SETTINGS["auto_detect_books_in_images"]))
     settings["book_lookup_enabled"] = bool(settings.get("book_lookup_enabled", DEFAULT_SETTINGS["book_lookup_enabled"]))
+    settings["book_download_enabled"] = bool(settings.get("book_download_enabled", DEFAULT_SETTINGS["book_download_enabled"]))
+    settings["book_download_max_mb"] = max(1, int(settings.get("book_download_max_mb", DEFAULT_SETTINGS["book_download_max_mb"]) or DEFAULT_SETTINGS["book_download_max_mb"]))
+    settings["book_download_formats"] = normalize_list_setting(settings.get("book_download_formats"), DEFAULT_SETTINGS["book_download_formats"])
+    settings["book_legal_sources"] = normalize_list_setting(settings.get("book_legal_sources"), DEFAULT_SETTINGS["book_legal_sources"])
     settings["web_search_enabled"] = bool(settings.get("web_search_enabled", DEFAULT_SETTINGS["web_search_enabled"]))
     settings["game_guard_delay_seconds"] = max(1, int(settings.get("game_guard_delay_seconds", 5) or 5))
     settings["button_color"] = valid_hex_color(str(settings.get("button_color", "")), DEFAULT_SETTINGS["button_color"])
@@ -89,6 +97,16 @@ def save_settings(settings: dict[str, object], path: Path = SETTINGS_PATH) -> No
         path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     except OSError:
         pass
+
+
+def normalize_list_setting(value: object, fallback: object) -> list[str]:
+    if isinstance(value, str):
+        items = [part.strip() for part in value.split(",")]
+    elif isinstance(value, (list, tuple, set)):
+        items = [str(part).strip() for part in value]
+    else:
+        items = [str(part).strip() for part in fallback] if isinstance(fallback, (list, tuple, set)) else []
+    return [item for item in items if item]
 
 
 def color_preset_name(color: str) -> str:

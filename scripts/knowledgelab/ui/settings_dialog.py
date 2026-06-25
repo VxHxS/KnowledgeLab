@@ -93,6 +93,7 @@ class SettingsDialog:
 
         self._build_dialog_section(frame)
         self._build_obsidian_section(frame)
+        self._build_models_section(frame)
         self._build_color_section(frame)
         self._build_automation_section(frame)
         self._build_buttons(frame)
@@ -139,41 +140,62 @@ class SettingsDialog:
 
         ttk.Separator(frame, orient="horizontal").grid(row=11, column=0, columnspan=3, sticky="ew", pady=(14, 12))
 
+    def _build_models_section(self, frame: ttk.Frame) -> None:
+        ttk.Label(frame, text="Модели LM Studio", style="SettingsHeader.TLabel").grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 8))
+
+        ttk.Label(frame, text="LLM (чат, код, текст)", background="#f4f6f8").grid(row=13, column=0, columnspan=3, sticky="w")
+        llm_entry = ttk.Entry(frame, textvariable=self.app.llm_model_var, width=54)
+        llm_entry.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+
+        ttk.Label(frame, text="Vision (фото, OCR)", background="#f4f6f8").grid(row=15, column=0, columnspan=3, sticky="w")
+        vision_entry = ttk.Entry(frame, textvariable=self.app.vision_model_var, width=54)
+        vision_entry.grid(row=16, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+
+        ttk.Label(frame, text="Embeddings (поиск по базе)", background="#f4f6f8").grid(row=17, column=0, columnspan=3, sticky="w")
+        embed_entry = ttk.Entry(frame, textvariable=self.app.embedding_model_var, width=54)
+        embed_entry.grid(row=18, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+
+        auto_switch_check = ttk.Checkbutton(frame, text="Автопереключение моделей", variable=self.app.auto_switch_models_var)
+        auto_switch_check.grid(row=19, column=0, columnspan=3, sticky="w", pady=3)
+        self.app.add_tooltip(auto_switch_check, "KnowledgeLab автоматически загружает нужную модель перед каждым запросом. Отключите, если хотите переключать модели вручную в LM Studio.", delay_ms=1000)
+
+        ttk.Separator(frame, orient="horizontal").grid(row=20, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+
     def _build_color_section(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, text="Цвет основной кнопки", style="SettingsHeader.TLabel").grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 10))
+        ttk.Label(frame, text="Цвет основной кнопки", style="SettingsHeader.TLabel").grid(row=21, column=0, columnspan=3, sticky="w", pady=(0, 10))
         preset_var = tk.StringVar(value=color_preset_name(self.app.button_color_var.get()))
         preset = ttk.Combobox(frame, textvariable=preset_var, values=list(BUTTON_COLOR_PRESETS.keys()), state="readonly", width=18)
-        preset.grid(row=13, column=0, sticky="w", padx=(0, 10))
+        preset.grid(row=22, column=0, sticky="w", padx=(0, 10))
         preset.bind("<<ComboboxSelected>>", lambda _event: self.select_color_preset(preset_var.get()))
         self.color_preview = tk.Label(frame, width=6, height=1, background=self.app.button_color_var.get(), relief="solid", borderwidth=1)
-        self.color_preview.grid(row=13, column=1, sticky="w", padx=(0, 10))
-        ttk.Button(frame, text="Выбрать...", command=self.choose_button_color).grid(row=13, column=2, sticky="e")
+        self.color_preview.grid(row=22, column=1, sticky="w", padx=(0, 10))
+        ttk.Button(frame, text="Выбрать...", command=self.choose_button_color).grid(row=22, column=2, sticky="e")
 
-        ttk.Separator(frame, orient="horizontal").grid(row=14, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+        ttk.Separator(frame, orient="horizontal").grid(row=23, column=0, columnspan=3, sticky="ew", pady=(14, 12))
 
     def _build_automation_section(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, text="Автоматизация", style="SettingsHeader.TLabel").grid(row=15, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(frame, text="Автоматизация", style="SettingsHeader.TLabel").grid(row=24, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
         auto_route_check = ttk.Checkbutton(frame, text="Автоматически распределять материалы по темам", variable=self.app.auto_route_topics_var)
-        auto_route_check.grid(row=16, column=0, columnspan=3, sticky="w", pady=3)
+        auto_route_check.grid(row=25, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_route_check, "KnowledgeLab сам выбирает тему и проект для новых материалов, а потом показывает в чате отчёт, куда всё разложено.", delay_ms=1000)
 
         auto_create_check = ttk.Checkbutton(frame, text="Автоматически создавать новые темы", variable=self.app.auto_create_topics_var)
-        auto_create_check.grid(row=17, column=0, columnspan=3, sticky="w", pady=3)
+        auto_create_check.grid(row=26, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_create_check, "Если подходящей темы ещё нет, будет создана папка Topics/<тема> и служебная заметка _Topic.md.", delay_ms=1000)
 
         auto_books_check = ttk.Checkbutton(frame, text="Автоматически искать книги по фото", variable=self.app.auto_detect_books_var)
-        auto_books_check.grid(row=18, column=0, columnspan=3, sticky="w", pady=3)
+        auto_books_check.grid(row=27, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_books_check, "Для фото книжной полки или обложки локальная vision-модель пытается прочитать корешки/названия и добавить найденные книги в 50 Library.", delay_ms=1000)
 
         book_lookup_check = ttk.Checkbutton(frame, text="Обогащать книги через онлайн-каталоги", variable=self.app.book_lookup_enabled_var)
-        book_lookup_check.grid(row=19, column=0, columnspan=3, sticky="w", pady=3)
+        book_lookup_check.grid(row=28, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(book_lookup_check, "Онлайн-каталоги помогают уточнить автора, ISBN, обложку и год. Сейчас используются Open Library (открытый книжный каталог Internet Archive) и Google Books. Если совпадение слабое, чат попросит уточнить книгу.", delay_ms=1000)
 
     def _build_buttons(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, textvariable=self.app.settings_status_var, style="SettingsStatus.TLabel").grid(row=20, column=0, columnspan=3, sticky="w", pady=(14, 0))
+        ttk.Label(frame, textvariable=self.app.settings_status_var, style="SettingsStatus.TLabel").grid(row=29, column=0, columnspan=3, sticky="w", pady=(14, 0))
         buttons = ttk.Frame(frame, style="App.TFrame")
-        buttons.grid(row=21, column=0, columnspan=3, sticky="ew", pady=(16, 0))
+        buttons.grid(row=30, column=0, columnspan=3, sticky="ew", pady=(16, 0))
         ttk.Button(buttons, text="Сбросить настройки", command=self.reset).grid(row=0, column=0, sticky="w")
         ttk.Button(buttons, text="Отмена", command=self.close).grid(row=0, column=1, padx=(0, 8))
         ttk.Button(buttons, text="Сохранить", command=self.save).grid(row=0, column=2)
@@ -192,6 +214,10 @@ class SettingsDialog:
         self.app.settings["web_search_enabled"] = bool(self.app.web_search_enabled_var.get())
         self.app.settings["obsidian_path"] = self.app.obsidian_path_var.get().strip()
         self.app.settings["vault_path"] = self.app.vault_path_var.get().strip() or str(DEFAULT_VAULT_DIR)
+        self.app.settings["llm_model"] = self.app.llm_model_var.get().strip()
+        self.app.settings["vision_model"] = self.app.vision_model_var.get().strip()
+        self.app.settings["embedding_model"] = self.app.embedding_model_var.get().strip()
+        self.app.settings["auto_switch_models"] = bool(self.app.auto_switch_models_var.get())
         self.app.save_settings()
         import main as _main
         _main.VAULT_DIR = self.app.vault_dir()
@@ -215,6 +241,10 @@ class SettingsDialog:
         self.app.button_color_var.set(str(DEFAULT_SETTINGS["button_color"]))
         self.app.obsidian_path_var.set("")
         self.app.vault_path_var.set(str(DEFAULT_VAULT_DIR))
+        self.app.llm_model_var.set(str(DEFAULT_SETTINGS.get("llm_model", "")))
+        self.app.vision_model_var.set(str(DEFAULT_SETTINGS.get("vision_model", "")))
+        self.app.embedding_model_var.set(str(DEFAULT_SETTINGS.get("embedding_model", "")))
+        self.app.auto_switch_models_var.set(bool(DEFAULT_SETTINGS.get("auto_switch_models", True)))
         self.app.settings_status_var.set("Настройки сброшены до значений по умолчанию.")
         if self.color_preview:
             self.color_preview.configure(background=self.app.button_color_var.get())

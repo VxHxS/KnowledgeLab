@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from knowledgelab.config import ROOT, VAULT_DIR, LAYER_FINISHED_PROJECTS
+from knowledgelab.i18n.messages import msg, msg_list
 from knowledgelab.models import KnowledgeRoute
 
 
@@ -20,10 +21,37 @@ NOISY_HISTORY_MARKERS = (
     "success! server is now running",
 )
 
+RUNTIME_CONTEXT_TERMS = msg_list("runtime.context_terms")
+ORDINARY_SHORT_CHAT_TERMS = msg_list("runtime.ordinary_short_chat_terms")
+
+
+def should_include_runtime_context(question: str) -> bool:
+    lowered = re.sub(r"\s+", " ", str(question or "").strip().lower())
+    if not lowered:
+        return False
+    if len(lowered) <= 80 and any(term in lowered for term in ORDINARY_SHORT_CHAT_TERMS):
+        return False
+    return any(term in lowered for term in RUNTIME_CONTEXT_TERMS)
+
 
 def is_safe_history_message(text: str) -> bool:
     lowered = text.lower()
     return bool(text.strip()) and not any(marker in lowered for marker in NOISY_HISTORY_MARKERS)
+
+
+def build_topic_context(route: KnowledgeRoute, recent_topics: list[str] | None = None) -> str:
+    """Build a topic-aware context block for the system prompt."""
+    scope = str(route.scope or "general").lower()
+    topic_descriptions = {
+        "web": "фронтенд/бэкенд веб-разработка: HTML, CSS, JavaScript, TypeScript, React, Vue, Next.js, Node.js, API, базы данных, деплой",
+        "game": "геймдев: Unity, Unreal Engine, C#, шейдеры, геймдизайн, физика, анимация, оптимизация",
+        "general": "общие знания, программирование, референсы, инструменты, документация",
+    }
+    desc = topic_descriptions.get(scope, topic_descriptions["general"])
+    lines = [f"Текущая специализация: {desc}"]
+    if recent_topics:
+        lines.append(f"Активные темы пользователя: {', '.join(recent_topics[:5])}")
+    return "\n".join(lines)
 
 
 def build_prompt_with_history(
@@ -31,9 +59,21 @@ def build_prompt_with_history(
     runtime_context: str,
     prior_messages: list[dict],
 ) -> str:
+    lines = [
+        msg("prompts.plain_base_instruction"),
+        msg("prompts.no_hidden_context_echo"),
+    ]
+    runtime_context = str(runtime_context or "").strip()
+    if runtime_context:
+        lines.extend([
+            "",
+            msg("prompts.hidden_state_intro"),
+            runtime_context,
+        ])
     if not prior_messages:
-        return runtime_context + "\n\nТекущее сообщение пользователя:\n" + question
-    lines = [runtime_context, "", "Краткий контекст текущего диалога:"]
+        lines.extend(["", msg("prompts.current_user_message"), question])
+        return "\n".join(lines)
+    lines.extend(["", msg("prompts.chat_context_header")])
     total_chars = 0
     for message in prior_messages[-4:]:
         if message.get("role") not in {"user", "assistant"}:
@@ -47,19 +87,24 @@ def build_prompt_with_history(
         if total_chars > 1600:
             break
         lines.append(line)
-    lines.extend(["", f"Текущее сообщение пользователя: {question}"])
+    lines.extend(["", f"{msg('prompts.current_user_message')} {question}"])
     return "\n".join(lines)
 
 
 def lightrag_help_message(lightrag_enabled: bool = False) -> str:
-    state = "включен" if lightrag_enabled else "выключен"
-    return (
-        f"LightRAG сейчас {state}. Чтобы получить ответ из сохраненных материалов, "
-        "включите LightRAG в Настройках или явно попросите поиск по базе: "
-        "«найди в базе материалы про CSS», «что у меня сохранено про лендинги», "
-        "«сделай инструкцию из сохраненных материалов». "
-        "Если я напишу, что индекс не готов, откройте LightRAG-Control и запустите проверку или переиндексацию."
-    )
+    state = msg("lightrag.state_on") if lightrag_enabled else msg("lightrag.state_off")
+    return msg("lightrag.help", state=state)
+
+
+def _short_storage_token(value: str, max_length: int = 48) -> str:
+    import hashlib
+    import re
+    token = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "")).strip("-") or "default"
+    if len(token) <= max_length:
+        return token
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()[:12]
+    prefix_length = max(8, max_length - 13)
+    return f"{token[:prefix_length]}-{digest}"
 
 
 def storage_name_for_scope(scope: str, project: str, layer: str = "active") -> str:
@@ -67,6 +112,7 @@ def storage_name_for_scope(scope: str, project: str, layer: str = "active") -> s
     if layer == "finished-projects":
         return "finished_projects"
     safe_project = re.sub(r"[^a-z0-9_-]+", "-", project.strip().lower()) or "default"
+    safe_project = _short_storage_token(safe_project)
     if scope == "all":
         return "all"
     if scope == "web" and safe_project not in {"default", "web-development"}:

@@ -8,12 +8,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from knowledgelab.config import ROOT, VAULT_DIR
+from knowledgelab.utils.text import clean_filename, yaml_quote
+from knowledgelab.utils.urls import URL_RE
 from vault_sources import slugify
-
-
-ROOT = Path(__file__).resolve().parents[1]
-VAULT_DIR = ROOT / "Obsidian-Test-Vault"
-URL_RE = re.compile(r"https?://[^\s<>)\]]+", re.IGNORECASE)
 AD_NOISE_PATTERNS: list[tuple[str, str, int]] = [
     ("explicit_ad", r"(?i)(#\s*реклама|\bреклам[ауыо]?|\bad\b|\bads\b|sponsored|спонсорск)", 4),
     ("promo_offer", r"(?i)(промокод|скидк|акци[яи]|распродаж|sale|discount|special offer)", 2),
@@ -43,17 +41,6 @@ def flatten_text(value: Any) -> str:
                     parts.append(text)
         return "".join(parts)
     return str(value)
-
-
-def yaml_quote(value: str) -> str:
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-    return f'"{escaped}"'
-
-
-def clean_filename(value: str) -> str:
-    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", value).strip()
-    value = re.sub(r"\s+", " ", value)
-    return value[:120].strip(" .-") or "telegram"
 
 
 def message_datetime(message: dict[str, Any]) -> dt.datetime:

@@ -401,7 +401,7 @@ Run first: scripts\ingest-vault-scope-lmstudio.ps1 -Scope general
 Создан чатовый слой:
 
 ```text
-scripts/knowledge_chat_gui.py
+scripts/main.py
 scripts/chat-vault-lmstudio.py
 scripts/chat-vault-lmstudio.ps1
 ```

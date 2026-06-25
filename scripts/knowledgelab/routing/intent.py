@@ -135,3 +135,57 @@ def infer_kind(text: str) -> str:
     if any(term in lowered for term in ("решение", "solution", "snippet", "компонент", "pattern", "паттерн")):
         return "solution"
     return "capture"
+
+
+GOAL_INTENT_PATTERNS: list[tuple[str, list[str]]] = [
+    ("make_website", [
+        "сделай сайт", "создай сайт", "make a website", "create a website",
+        "сделай веб-сайт", "создай веб-сайт", "новый сайт", "new website",
+        "сделай страницу", "создай страницу", "сверстай", "сверстать",
+        "сделай лендинг", "создай лендинг", "make landing", "create landing",
+    ]),
+    ("refactor_project", [
+        "рефакторинг", "refactor", "рефактор", "перепиши код", "refactor code",
+        "упорядочи код", "приведи в порядок", "clean up code", "cleanup",
+        "оптимизируй код", "optimize code", "переработай", "rework",
+    ]),
+    ("launch_on_server", [
+        "подними на сервере", "запусти на сервере", "launch on server",
+        "поднять на локальном", "запустить на локальном", "local server",
+        "подними локально", "запусти локально", "run locally", "start server",
+        "подними сайт", "запусти сайт", "запусти проект", "подними проект",
+    ]),
+    ("analyze_project", [
+        "проанализируй проект", "analyze project", "анализ проекта",
+        "что в проекте", "what's in the project", "обзор проекта",
+        "project overview", "что содержит проект", "project structure",
+    ]),
+    ("code_review", [
+        "проанализируй код", "review code", "код ревью", "code review",
+        "проверь код", "check code", "качество кода", "code quality",
+        "плохие запахи", "code smells", "осмысленные названия",
+        "разбей на модули", "split into modules", "рефакторь код",
+    ]),
+]
+
+
+def classify_intent(text: str) -> dict[str, str]:
+    """Classify user input and return intent type with optional goal."""
+    compact = compact_text(text)
+    lowered = compact.lower()
+
+    for goal_id, patterns in GOAL_INTENT_PATTERNS:
+        if any(pattern in lowered for pattern in patterns):
+            return {"type": "goal", "goal": goal_id, "text": text}
+
+    if first_github_url(text) or first_codepen_url(text) or first_youtube_url(text) or first_telegram_url(text):
+        return {"type": "save", "text": text}
+    if first_url(text):
+        return {"type": "save", "text": text}
+    if is_save_intent_text(text):
+        return {"type": "save", "text": text}
+    if is_knowledge_lookup_text(text):
+        return {"type": "knowledge_lookup", "text": text}
+    if is_lightrag_help_text(text):
+        return {"type": "knowledge_help", "text": text}
+    return {"type": "chat", "text": text}

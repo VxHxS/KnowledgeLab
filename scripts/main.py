@@ -76,7 +76,7 @@ from knowledgelab.routing.intent import (  # noqa: F401
     is_finished_project_lookup_text, subject_route_from_text, route_context,
     normalize_subject_scope, default_finished_project_section,
     is_knowledge_lookup_text, is_lightrag_help_text, is_russian_language_request,
-    is_save_intent_text, infer_topic, infer_kind,
+    is_save_intent_text, infer_topic, infer_kind, classify_intent,
 )
 from knowledgelab.routing.topics import (  # noqa: F401
     builtin_topic_names, collect_topic_registry, topic_note_path,
@@ -142,9 +142,11 @@ from knowledgelab.llm.lmstudio import (  # noqa: F401
     vision_model_state as vision_model_state_standalone,
     call_plain_lmstudio as call_plain_lmstudio_standalone,
 )
+from knowledgelab.llm.model_manager import ModelManager
 from knowledgelab.llm.runtime_context import (  # noqa: F401
     build_runtime_context_prompt, is_safe_history_message as is_safe_history_message_standalone,
     build_prompt_with_history as build_prompt_with_history_standalone,
+    should_include_runtime_context as should_include_runtime_context_standalone,
     lightrag_help_message as lightrag_help_message_standalone,
     storage_name_for_scope as storage_name_for_scope_standalone,
     lightrag_index_path as lightrag_index_path_standalone,
@@ -175,6 +177,8 @@ from knowledgelab.ui.obsidian import (  # noqa: F401
 from knowledgelab.ui.settings_dialog import SettingsDialog
 from knowledgelab.ui.game_guard_dialog import GameGuardDialog
 from knowledgelab.material.workers import MaterialWorkerManager
+from knowledgelab.ui.animated_edges import AnimatedEdgeFrame
+from knowledgelab.ui.message_bubble import AnimatedMessageBubble
 from knowledgelab.ui.project_panel import ProjectActionPanel
 from knowledgelab.vault.capture_workflow import CaptureWorkflow
 from knowledgelab.ui.chat_list import ChatListManager
@@ -246,6 +250,9 @@ from knowledgelab.ui.chat_store import (  # noqa: F401
     chat_group_name as chat_group_name_standalone,
     chat_group_by_context as chat_group_by_context_standalone,
 )
+from knowledgelab.nodes.registry import get_registry
+from knowledgelab.nodes.builtin_nodes import BUILTIN_NODES
+from knowledgelab.nodes.goal_nodes import GOAL_NODES
 
 
 
@@ -771,6 +778,10 @@ class KnowledgeChatApp:
         self.button_color_var = tk.StringVar(value=str(self.settings["button_color"]))
         self.obsidian_path_var = tk.StringVar(value=str(self.settings.get("obsidian_path", "")))
         self.vault_path_var = tk.StringVar(value=str(self.settings.get("vault_path", str(DEFAULT_VAULT_DIR))))
+        self.llm_model_var = tk.StringVar(value=str(self.settings.get("llm_model", "")))
+        self.vision_model_var = tk.StringVar(value=str(self.settings.get("vision_model", "")))
+        self.embedding_model_var = tk.StringVar(value=str(self.settings.get("embedding_model", "")))
+        self.auto_switch_models_var = tk.BooleanVar(value=bool(self.settings.get("auto_switch_models", True)))
 
         global VAULT_DIR
         VAULT_DIR = self.vault_dir()
@@ -783,6 +794,7 @@ class KnowledgeChatApp:
         self._project_panel = ProjectActionPanel(self)
         self._capture_workflow = CaptureWorkflow(self)
         self._chat_list = ChatListManager(self)
+        self._model_manager = ModelManager(str(self.settings.get("lmstudio_base_url", LMSTUDIO_API_URL)))
         self.tooltips: list[ToolTip] = []
         self.icon_images: list[tk.PhotoImage] = []
         self.obsidian_raw_image: tk.PhotoImage | None = None
@@ -820,6 +832,10 @@ class KnowledgeChatApp:
         self.last_book_discovery_report: BookDiscoveryReport | None = None
         self.dnd_backend = "none"
         self.project_actions = self.load_project_actions()
+
+        self.node_registry = get_registry()
+        for node_cls in BUILTIN_NODES + GOAL_NODES:
+            self.node_registry.register(node_cls)
 
         self.chat_store = self.load_chat_store()
         self.active_chat_id = str(self.chat_store.get("active_chat_id") or "")
@@ -1100,13 +1116,20 @@ class KnowledgeChatApp:
         chat_shadow.columnconfigure(0, weight=1)
         chat_shadow.rowconfigure(0, weight=1)
 
-        chat_shell = tk.Frame(chat_shadow, bg=UI_THEME["panel_border"], padx=1, pady=1)
+        chat_shell = AnimatedEdgeFrame(
+            chat_shadow,
+            background=UI_THEME["chat_bg"],
+            border="#aec5d4",
+            thickness=6,
+            animated=True,
+        )
         chat_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=(0, 2))
-        chat_shell.columnconfigure(0, weight=1)
-        chat_shell.rowconfigure(0, weight=1)
+        chat_content = chat_shell.content
+        chat_content.columnconfigure(0, weight=1)
+        chat_content.rowconfigure(0, weight=1)
 
         self.chat = tk.Text(
-            chat_shell,
+            chat_content,
             wrap="word",
             state="disabled",
             padx=14,
@@ -1119,7 +1142,7 @@ class KnowledgeChatApp:
             font=("Segoe UI", 10),
         )
         self.chat.grid(row=0, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(chat_shell, orient="vertical", command=self.chat.yview)
+        scroll = ttk.Scrollbar(chat_content, orient="vertical", command=self.chat.yview)
         scroll.grid(row=0, column=1, sticky="ns")
         self.chat.configure(yscrollcommand=scroll.set)
         self.chat.tag_configure("assistant", foreground="#202124", spacing1=8, spacing3=12, lmargin1=2, lmargin2=2, rmargin=120)
@@ -1539,11 +1562,16 @@ class KnowledgeChatApp:
     def extract_chat_content(self, response: dict) -> tuple[str, str]:
         return extract_chat_content_standalone(response)
 
-    def call_plain_lmstudio(self, question: str, *, max_tokens: int | None = None) -> tuple[str, str]:
+    def call_plain_lmstudio(self, question: str, *, max_tokens: int | None = None, topic_context: str = "") -> tuple[str, str]:
         max_tokens = max_tokens or int(os.getenv("LMSTUDIO_GUI_MAX_RESPONSE_TOKENS", "1800"))
+        if bool(self.settings.get("auto_switch_models", True)):
+            llm_model = self.llm_model_id()
+            if llm_model:
+                self._model_manager.ensure_model(llm_model)
         return call_plain_lmstudio_standalone(
             question, self.lmstudio_base_url(), self.llm_model_id(),
             timeout=min(self.query_timeout_seconds, 120), max_tokens=max_tokens,
+            topic_context=topic_context,
         )
 
     def run_plain_query(
@@ -1553,13 +1581,14 @@ class KnowledgeChatApp:
         pending_warnings: list[str],
         web_search_enabled: bool = False,
         web_query: str = "",
+        topic_context: str = "",
     ) -> None:
         warnings = list(pending_warnings)
         try:
             if web_search_enabled:
                 question, web_warnings = self.prepare_web_prompt(web_query or question, question)
                 warnings.extend(web_warnings)
-            output, model_warning = self.call_plain_lmstudio(question)
+            output, model_warning = self.call_plain_lmstudio(question, topic_context=topic_context)
             if model_warning:
                 warnings.append(model_warning)
             if not output:
@@ -1587,18 +1616,20 @@ class KnowledgeChatApp:
         if not messages:
             self.show_intro()
             return
-        for message in messages:
+        animated_from = max(0, len(messages) - 2)
+        for index, message in enumerate(messages):
             role = str(message.get("role") or "assistant")
             text = str(message.get("text") or "")
             warnings = [str(item) for item in message.get("warnings", []) if item]
+            animated = index >= animated_from
             if role == "user":
-                self.append_user_message(text, persist=False)
+                self.append_user_message(text, persist=False, animated=animated)
             elif role == "error":
-                self.append_assistant_message(text, "error", persist=False)
+                self.append_assistant_message(text, "error", persist=False, animated=animated)
             elif role == "system":
                 self.append_warning_message(text, persist=False)
             else:
-                self.append_assistant_message(text, "assistant", persist=False)
+                self.append_assistant_message(text, "assistant", persist=False, animated=animated)
             action_id = str(message.get("project_action_id") or "")
             if action_id and role in {"assistant", "system"}:
                 self.append_project_action_panel(action_id)
@@ -1626,6 +1657,24 @@ class KnowledgeChatApp:
         self.chat.configure(state="disabled")
         self.chat.see("end")
 
+    def append_dialog_bubble(self, text: str, role: str, *, animated: bool = True) -> None:
+        self.chat.configure(state="normal")
+        self.chat.insert("end", "\n")
+        canvas_width = max(430, self.chat.winfo_width() - 28)
+        bubble = AnimatedMessageBubble(
+            self.chat,
+            text,
+            role=role,
+            canvas_width=canvas_width,
+            background=UI_THEME["chat_bg"],
+            animated=animated,
+        )
+        self.chat.window_create("end", window=bubble)
+        self.chat.insert("end", "\n")
+        self.chat_widgets.append(bubble)
+        self.chat.configure(state="disabled")
+        self.chat.see("end")
+
     def append_system(self, text: str, persist: bool = False) -> None:
         self.append(f"{text}\n", "system")
         if persist:
@@ -1639,42 +1688,11 @@ class KnowledgeChatApp:
         ]
         return int(canvas.create_polygon(points, smooth=True, fill=fill, outline=""))
 
-    def append_user_message(self, text: str, persist: bool = True) -> None:
+    def append_user_message(self, text: str, persist: bool = True, animated: bool | None = None) -> None:
         clean_text = text.strip()
         if not clean_text:
             return
-        self.chat.configure(state="normal")
-        self.chat.insert("end", "\n")
-        canvas_width = max(430, self.chat.winfo_width() - 28)
-        bubble_width = min(560, max(220, canvas_width - 190))
-        canvas = tk.Canvas(self.chat, width=canvas_width, height=58, highlightthickness=0, bd=0, background="#ffffff")
-        text_id = canvas.create_text(
-            canvas_width - 22,
-            14,
-            text=clean_text,
-            anchor="ne",
-            width=bubble_width - 28,
-            justify="left",
-            fill="#202124",
-            font=("Segoe UI", 10),
-        )
-        bbox = canvas.bbox(text_id) or (canvas_width - bubble_width, 8, canvas_width - 18, 44)
-        rect = self.rounded_canvas_rect(
-            canvas,
-            max(12, bbox[0] - 13),
-            max(6, bbox[1] - 10),
-            min(canvas_width - 10, bbox[2] + 13),
-            bbox[3] + 10,
-            12,
-            fill="#f0f1f3",
-        )
-        canvas.tag_lower(rect, text_id)
-        canvas.configure(height=max(46, bbox[3] + 18))
-        self.chat.window_create("end", window=canvas)
-        self.chat.insert("end", "\n")
-        self.chat_widgets.append(canvas)
-        self.chat.configure(state="disabled")
-        self.chat.see("end")
+        self.append_dialog_bubble(clean_text, "user", animated=persist if animated is None else animated)
         if persist:
             route = self.selected_route(clean_text)
             self.add_message("user", clean_text, route.context_name)
@@ -1687,11 +1705,15 @@ class KnowledgeChatApp:
         warnings: list[str] | None = None,
         lightrag_used: bool | None = None,
         project_action_id: str = "",
+        animated: bool | None = None,
     ) -> None:
         clean_text = text.strip()
         if not clean_text:
             return
-        self.append(f"{clean_text}\n", tag)
+        if tag in {"assistant", "error"}:
+            self.append_dialog_bubble(clean_text, tag, animated=persist if animated is None else animated)
+        else:
+            self.append(f"{clean_text}\n", tag)
         if persist:
             chat = self.get_active_chat()
             context_name = "General"
@@ -1709,16 +1731,19 @@ class KnowledgeChatApp:
                 self.add_message("system", clean_text, "General")
 
     def append_material_routing_report(self, reports: list[MaterialRoutingReport]) -> None:
-        report_text = format_material_routing_report(reports)
+        detail = str(self.settings.get("message_detail_level", "compact"))
+        report_text = format_material_routing_report(reports, detail=detail)
         if report_text:
             self.append_assistant_message(report_text, lightrag_used=False)
 
     def append_book_discovery_report(self, report: BookDiscoveryReport) -> None:
         self.last_book_discovery_report = report
-        self.append_assistant_message(format_book_discovery_report(report), lightrag_used=False)
+        detail = str(self.settings.get("message_detail_level", "compact"))
+        self.append_assistant_message(format_book_discovery_report(report, detail=detail), lightrag_used=False)
 
     def append_video_analysis_report(self, report: VideoAnalysisReport) -> None:
-        self.append_assistant_message(format_video_analysis_report_standalone(report), lightrag_used=False)
+        detail = str(self.settings.get("message_detail_level", "compact"))
+        self.append_assistant_message(format_video_analysis_report_standalone(report, detail=detail), lightrag_used=False)
 
     def start_background_task(self, kind: str, label: str, *, source_path: str = "", rel_path: str = "", detail: str = "") -> str:
         task_id = f"{kind}-{int(time.time() * 1000)}-{len(self.background_tasks) + 1}"
@@ -2000,10 +2025,13 @@ class KnowledgeChatApp:
         web_context = render_web_search_context(question, results)
         enhanced = (
             f"{web_context}\n\n"
-            "Answer the user in Russian. If web results are insufficient, say that clearly.\n\n"
-            f"User question:\n{prompt}"
+            "IMPORTANT: Answer the user's question using the web search results above.\n"
+            "If the results contain relevant information, summarize it clearly and cite the source URLs.\n"
+            "If the results are not relevant, say 'web-поиск не нашёл релевантных результатов по этому запросу' and answer from your own knowledge.\n"
+            "Answer in Russian. Be concise and accurate.\n\n"
+            f"User question: {prompt}"
         )
-        return enhanced, [f"Web-поиск использован: {len(results)} результатов передано LLM."]
+        return enhanced, [f"Web-поиск: {len(results)} результатов передано LLM."]
 
     def load_input_history(self) -> None:
         questions: list[str] = []
@@ -2510,6 +2538,18 @@ class KnowledgeChatApp:
     def append_project_action_panel(self, action_id: str) -> None:
         self._project_panel.append_panel(action_id)
 
+    def run_goal_node(self, goal_id: str, payload: dict | None = None) -> dict:
+        """Run a goal-oriented node by ID."""
+        ctx = {"app": self}
+        result = self.node_registry.run_node(goal_id, payload or {}, ctx)
+        if "error" in result:
+            self.append_warning_message(f"Goal node error: {result['error']}", persist=False)
+        return result
+
+    def list_available_nodes(self) -> list[dict[str, str]]:
+        """Return metadata for all registered nodes."""
+        return self.node_registry.list_nodes()
+
     def save_file_capture(
         self,
         file_path: Path,
@@ -2709,7 +2749,7 @@ class KnowledgeChatApp:
         thread.start()
 
     def build_prompt_with_history(self, question: str) -> str:
-        runtime_context = self.runtime_context_prompt(question)
+        runtime_context = self.runtime_context_prompt(question) if should_include_runtime_context_standalone(question) else ""
         chat = self.get_active_chat()
         messages = chat.get("messages", []) if chat else []
         prior = [m for m in messages if m.get("role") in {"user", "assistant"} and is_safe_history_message_standalone(str(m.get("text", "")))]
@@ -3040,6 +3080,8 @@ class KnowledgeChatApp:
         self._game_guard_dialog.show_warning(snapshot)
 
 def main() -> None:
+    if "--self-test" in sys.argv:
+        raise SystemExit(run_static_self_test())
     if "--behavior-test" in sys.argv:
         raise SystemExit(run_behavior_self_test())
 
@@ -3057,6 +3099,73 @@ def main() -> None:
         pass
     KnowledgeChatApp(root)
     root.mainloop()
+
+
+def run_static_self_test() -> int:
+    try:
+        with tempfile.TemporaryDirectory(prefix="knowledgelab-self-test-") as tmp:
+            tmp_vault = Path(tmp) / "vault"
+
+            topic = classify_material_topic_standalone(
+                "React hooks tutorial",
+                "web",
+                "article",
+                vault_dir=tmp_vault,
+            )
+            if not topic:
+                raise AssertionError("topic classification returned an empty topic")
+
+            created_topic = ensure_topic_exists_standalone("Self Test Topic", "general", "", tmp_vault)
+            topic_path = topic_note_path("general", "Self Test Topic", "", tmp_vault)
+            if not created_topic or not topic_path.exists():
+                raise AssertionError("topic creation did not write into the requested vault")
+
+            vision_json = json.dumps(
+                {
+                    "detected_books": [
+                        {
+                            "title": "Clean Code",
+                            "author": "Robert C. Martin",
+                            "confidence": 0.94,
+                            "status": "found",
+                        }
+                    ],
+                    "unresolved": [{"region": "top shelf", "reason": "blurred", "evidence": "partial spine"}],
+                },
+                ensure_ascii=False,
+            )
+            parsed = parse_bookshelf_detection_response(vision_json)
+            books = parsed.get("detected_books", [])
+            if not books or books[0].get("title") != "Clean Code":
+                raise AssertionError("book detection parser failed")
+
+            created_notes = save_detected_book_notes_standalone(
+                books,
+                "00 Inbox/Images/self-test.md",
+                "C:/tmp/self-test.jpg",
+                tmp_vault,
+                allow_unverified=True,
+            )
+            if not created_notes:
+                raise AssertionError("book note was not created")
+
+            routing_report = format_material_routing_report([
+                MaterialRoutingReport("self-test.md", "article", topic, "Topics/self-test.md", True)
+            ])
+            if "Разложено по темам" not in routing_report:
+                raise AssertionError("material routing report formatting failed")
+
+            book_report = format_book_discovery_report(
+                BookDiscoveryReport("00 Inbox/Images/self-test.md", books, parsed.get("unresolved", []), [])
+            )
+            if "Отчёт по книгам" not in book_report:
+                raise AssertionError("book discovery report formatting failed")
+
+        print("KnowledgeLab self-test OK")
+        return 0
+    except Exception as exc:
+        print(f"KnowledgeLab self-test failed: {exc}")
+        return 1
 
 
 def run_behavior_self_test() -> int:
