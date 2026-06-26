@@ -86,6 +86,7 @@ Default behavior:
 - The web-search icon toggles web context mode. When on, messages fetch DuckDuckGo search snippets and pass them into the LLM prompt. The system prompt instructs the LLM to USE search results rather than making up answers.
 - The paperclip button accepts files, local folders, or GitHub repository URLs. A dedicated folder button opens the local-folder picker directly. The microphone button tries Windows Speech Recognition.
 - Explorer drag-and-drop uses `tkinterdnd2` when available. To force-disable, set `KNOWLEDGELAB_DISABLE_EXPLORER_DND=1`.
+- **Keyboard shortcuts**: `Ctrl+C` (copy), `Ctrl+V` (paste), `Ctrl+A` (select all) work in chat and input.
 - **Duplicate detection**: when dragging files or folders, the system checks if they were already imported. If duplicates are found, a dialog offers to skip them, save as copies, or cancel.
 - Settings includes an `Automation` section and a `Message detail level` option (`compact` or `full`).
 - The Obsidian icon opens the Obsidian app; if not found, the user can choose `Obsidian.exe`.
@@ -166,6 +167,34 @@ KnowledgeLab supports free vault synchronization between devices:
 - View sync status (folders, last sync, conflicts).
 - Setup instructions included in Settings.
 
+## Port Auto-Detection
+
+KnowledgeLab automatically detects the LM Studio server port:
+
+1. Environment variable `LMSTUDIO_BASE_URL`
+2. Common ports (5000, 1234, 11434, 8080, 8000, 3000, 9090)
+3. All listening ports on `127.0.0.1` via netstat scan
+4. Port history file (`~/.knowledgelab/port_history.json`)
+5. Default port (1234)
+
+If auto-detection fails, the user can enter the port manually in Settings.
+
+## Model Manager
+
+KnowledgeLab manages three model types via LM Studio API:
+
+| Type | Purpose | When loaded |
+|------|---------|-------------|
+| **LLM** | Chat, code, transcript cleanup | Every message |
+| **Vision** | Book photos, OCR, image analysis | When photos are sent |
+| **Embeddings** | Vector search across vault | LightRAG queries |
+
+Models are loaded/unloaded automatically based on task. Disable in Settings → "Автопереключение моделей".
+
+### Animation
+
+When the model is thinking, a subtle animation appears on the answer bubble: 4 colorful shimmer lines travel around the border. The animation stops when the response arrives. User messages and completed answers have no animation.
+
 ## Web Search
 
 KnowledgeLab has a built-in web search feature powered by DuckDuckGo:
@@ -174,6 +203,14 @@ KnowledgeLab has a built-in web search feature powered by DuckDuckGo:
 - When enabled, every message fetches DuckDuckGo results and passes them as context to the LLM.
 - Uses DuckDuckGo JSON API (primary) with HTML fallback.
 - The system prompt instructs the LLM to USE search results rather than making up answers.
+
+## Drag-and-Drop
+
+Requires `tkinterdnd2` package. Install with:
+```bash
+pip install tkinterdnd2
+```
+Once installed, drag files/folders/images from Windows Explorer directly into the chat window.
 
 ## Settings
 
@@ -186,6 +223,10 @@ KnowledgeLab has a built-in web search feature powered by DuckDuckGo:
 | `message_detail_level` | `compact` | `compact` (short summaries) or `full` (detailed reports) |
 | `vault_git_auto_sync` | `false` | Auto-commit vault changes to Git every N minutes |
 | `vault_git_sync_interval` | `300` | Seconds between auto-sync attempts |
+| `auto_switch_models` | `true` | Auto-load/unload models via LM Studio API |
+| `llm_model` | configurable | LLM model name for chat and code |
+| `vision_model` | configurable | Vision model for book photos and OCR |
+| `embedding_model` | configurable | Embedding model for LightRAG search |
 
 ## Material Pipeline
 
