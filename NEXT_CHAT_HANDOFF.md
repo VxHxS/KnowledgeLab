@@ -1,8 +1,40 @@
 # KnowledgeLab Next Chat Handoff
 
-Last updated: 2026-06-13
+Last updated: 2026-06-26
 
 Use this file to continue the project in a new Codex chat without losing context.
+
+## Update 2026-06-26
+
+Active launcher note from the user: `C:\Users\Юрий\Desktop\LightRag` is where they start `LightRAG-Chat` / KnowledgeLab, and this launcher must point at the latest live install in `C:\MyFiles\KnowledgeLab`.
+
+Recent UI/runtime changes:
+
+- The chat dialog border in `scripts\knowledgelab\ui\animated_edges.py` is now a thin static frame at idle.
+- Final UI setting: the dialog frame is `1px`; the animated runner is also capped to that thin width.
+- Follow-up fix: for `1px` frames the runner is drawn on the `0.5px` canvas center instead of the edge coordinate, so it is not clipped/invisible; palette contrast was slightly increased while keeping muted colors.
+- The animated border segment runs only while the app is busy/model is thinking, via `KnowledgeChatApp.set_busy(...)`.
+- Follow-up visibility fix: the chat frame is now a thin `2px` Tk canvas border, because `1px` was too easy to miss and could still look static on light backgrounds. The runner is longer and higher-contrast but still muted.
+- `finish_query()` no longer stops the frame animation before inserting the answer; `set_busy(False)` now lets the edge animation stay visible for at least a short minimum window. A direct preview path was added: sending a message containing `переливы` / `анимация рамки` shows the edge animation for a few seconds without routing that message to the LLM.
+- Clipboard follow-up: `scripts\main.py` now installs explicit clipboard shortcuts for the input/chat widgets: `Ctrl+C/X/V/A`, `Ctrl+Insert`, `Shift+Insert`, Tk virtual `<<Copy>>/<<Cut>>/<<Paste>>`, and physical key handling for Russian layout (`ф/с/м/ч`). Right-click context menus were added for input and chat copy/paste/select-all flows.
+- Undo follow-up: input `Text` has `undo=True`, `autoseparators=True`, `maxundo=-1`; `Ctrl+Z`, `Ctrl+Y`, `Ctrl+Shift+Z`, and Russian-layout physical keys (`я/н`) are handled explicitly. Input clear/send resets the undo stack so sent messages are not restored accidentally.
+- The desktop shortcut `C:\Users\Юрий\Desktop\LightRag\LightRAG-Chat.lnk` was found pointing at staging. It was rewritten to run `C:\MyFiles\KnowledgeLab\LightRAG-Desktop\LightRAG-Desktop-Chat.ps1` with working directory `C:\MyFiles\KnowledgeLab`. The staging `desktop-launchers\Launch-KnowledgeLab.ps1` template now prefers the live root first and only falls back to staging if live is absent.
+- Settings now auto-fills the Obsidian path from `find_obsidian_path(...)`; smoke detected Obsidian via Start Menu shortcut.
+- LM Studio settings comboboxes no longer change selection on mouse wheel. Model lists are ranked per role: LLM, Vision, Embeddings. Smoke result: LLM `qwen/qwen2.5-coder-32b`, Vision `qwen2.5-vl-7b-instruct`, Embeddings `text-embedding-nomic-embed-text-v1.5`.
+- The old animated `...` thinking bubble was disabled so the only thinking animation is the moving border segment around the dialog.
+- The runner is a single muted tapered segment moving around the perimeter, inspired by the user's CodePen reference.
+- LM Studio base URL normalization avoids doubled `/v1/v1/models` and converts `/api/v1` to OpenAI-compatible `/v1`.
+- Port autodetect checks configured URL, remembered ports, common ports including `5000`, and listening local ports.
+- Local smoke probe detected LM Studio on `http://127.0.0.1:5000/v1` and returned models:
+  `qwen/qwen2.5-coder-32b`, `qwen/qwen3-14b`, `qwen2.5-vl-7b-instruct`, `text-embedding-nomic-embed-text-v1.5`.
+- Settings model dropdowns now use the shared LM Studio model helper and show a short status line when models are found, empty, or unavailable.
+- Russian routing phrases for save/delete/question detection were added to `scripts\knowledgelab\resources\messages.ru.json` so live configs that read these phrases from JSON import cleanly.
+- Live install `C:\MyFiles\KnowledgeLab` was synced with the updated runtime files, plus dependent packages that were missing/stale in live: `llm\model_manager.py`, `routing\intent.py`, `nodes\`, `sync\`, and `vision\`.
+- Active verification after sync:
+  - `py_compile`: OK
+  - `scripts\main.py --self-test`: OK
+  - LM Studio autodetect: `http://127.0.0.1:5000/v1`, found models `qwen/qwen2.5-coder-32b`, `qwen/qwen3-14b`, `qwen2.5-vl-7b-instruct`, `text-embedding-nomic-embed-text-v1.5`
+  - staging/live hashes match for key runtime files.
 
 ## Update 2026-06-25
 

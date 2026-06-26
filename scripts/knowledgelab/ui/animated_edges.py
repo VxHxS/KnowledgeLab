@@ -18,12 +18,14 @@ class AnimatedEdgeFrame(tk.Frame):
         palette: tuple[str, ...] | None = None,
         thickness: int = 3,
         animated: bool = True,
+        active: bool = False,
     ) -> None:
         self.background = background or UI_THEME["chat_bg"]
         self.border = border or "#c6d6e2"
-        self.palette = palette or ("#527f9d", "#6f8c58", "#8970a6", "#aa735f")
-        self.thickness = max(2, int(thickness or 3))
+        self.palette = palette or ("#1f6fa5", "#477f36", "#764aa7", "#ad533d")
+        self.thickness = max(1, int(thickness or 3))
         self.animated = bool(animated)
+        self._active = bool(active and self.animated)
         self._phase = 0.0
         self._after_id: str | None = None
 
@@ -50,21 +52,34 @@ class AnimatedEdgeFrame(tk.Frame):
         self.bind("<Destroy>", self._on_destroy, add="+")
         self.bind("<Configure>", lambda _event: self.redraw(), add="+")
         self.redraw()
-        if self.animated:
+        if self._active:
             self.start_animation()
 
     def start_animation(self) -> None:
+        if not self.animated:
+            return
+        self._active = True
         if self._after_id is None:
             self._tick()
 
     def stop_animation(self) -> None:
-        if self._after_id is None:
-            return
+        if self._after_id is not None:
+            try:
+                self.after_cancel(self._after_id)
+            except tk.TclError:
+                pass
+        self._after_id = None
+        self._active = False
         try:
-            self.after_cancel(self._after_id)
+            self.redraw()
         except tk.TclError:
             pass
-        self._after_id = None
+
+    def set_active(self, active: bool) -> None:
+        if active:
+            self.start_animation()
+            return
+        self.stop_animation()
 
     def redraw(self) -> None:
         for canvas in (self.top, self.left, self.right, self.bottom):
@@ -73,7 +88,7 @@ class AnimatedEdgeFrame(tk.Frame):
             height = max(1, canvas.winfo_height())
             canvas.create_rectangle(0, 0, width, height, fill=self.border, outline="")
 
-        if self.animated:
+        if self.animated and self._active:
             self._draw_shimmer()
 
     def _corner(self, row: int, column: int) -> None:
@@ -85,12 +100,12 @@ class AnimatedEdgeFrame(tk.Frame):
         width = max(1.0, float(self.top.winfo_width()))
         height = max(1.0, float(self.left.winfo_height()))
         perimeter = 2 * (width + height)
-        runner_length = min(360.0, max(190.0, perimeter * 0.32))
+        runner_length = min(420.0, max(220.0, perimeter * 0.28))
         color_index = int(self._phase * len(self.palette)) % len(self.palette)
         self._draw_tapered_runner(self._phase * perimeter, runner_length, self.palette[color_index])
 
     def _draw_tapered_runner(self, center_distance: float, length: float, color: str) -> None:
-        piece_count = 36
+        piece_count = 46
         piece = max(6.0, length / piece_count)
         pieces: list[tuple[float, float, str, int]] = []
         for step in range(piece_count):
@@ -99,9 +114,9 @@ class AnimatedEdgeFrame(tk.Frame):
             if weight <= 0.04:
                 continue
             distance = center_distance - length / 2.0 + step * piece
-            fade = max(0.0, 0.82 - weight * 0.78)
+            fade = max(0.0, 0.48 - weight * 0.48)
             segment_color = mix_hex_color(color, self.border, fade)
-            line_width = max(1, int(round(1 + weight * (self.thickness + 3))))
+            line_width = max(1, min(self.thickness, int(round(1 + weight * max(0, self.thickness - 1)))))
             pieces.append((weight, distance, segment_color, line_width))
         for _weight, distance, segment_color, line_width in sorted(pieces, key=lambda item: item[0]):
             self._draw_edge_piece(distance, piece * 1.18, segment_color, line_width)
@@ -111,7 +126,7 @@ class AnimatedEdgeFrame(tk.Frame):
         height = max(1.0, float(self.left.winfo_height()))
         perimeter = 2 * (width + height)
         distance %= perimeter
-        center = max(1.0, self.thickness / 2)
+        center = max(0.5, self.thickness / 2)
 
         if distance < width:
             start = min(width, max(0.0, distance))
@@ -136,9 +151,12 @@ class AnimatedEdgeFrame(tk.Frame):
         self.left.create_line(center, start, center, end, fill=color, width=line_width, capstyle="round")
 
     def _tick(self) -> None:
-        self._phase = (self._phase + 0.045) % 1.0
+        if not self._active:
+            self._after_id = None
+            return
+        self._phase = (self._phase + 0.035) % 1.0
         self.redraw()
-        self._after_id = self.after(45, self._tick)
+        self._after_id = self.after(40, self._tick)
 
     def _on_destroy(self, _event: tk.Event) -> None:
         self.stop_animation()

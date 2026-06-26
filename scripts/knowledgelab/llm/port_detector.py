@@ -1,4 +1,4 @@
-"""Auto-detect LM Studio port from running processes or config."""
+"""Auto-detect LM Studio server URL and remember working ports."""
 from __future__ import annotations
 
 import json
@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 PORT_HISTORY_FILE = Path(os.getenv("KNOWLEDGELAB_DATA_DIR", str(Path.home() / ".knowledgelab"))) / "port_history.json"
@@ -39,14 +40,67 @@ def _save_port(port: int, source: str) -> None:
     _write_port_history(history)
 
 
-def _try_port(port: int, timeout: int = 2) -> bool:
-    import urllib.request
+def normalize_lmstudio_base_url(value: str | None, default_port: int = DEFAULT_PORT) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        raw = f"http://127.0.0.1:{default_port}"
+    if not re.match(r"^https?://", raw, re.IGNORECASE):
+        raw = "http://" + raw
+    if raw.endswith("/api/v1"):
+        return raw[:-7].rstrip("/") + "/v1"
+    if raw.endswith("/v1"):
+        return raw
+    return raw + "/v1"
+
+
+def lmstudio_server_root(base_url: str) -> str:
+    normalized = normalize_lmstudio_base_url(base_url)
+    return normalized[:-3] if normalized.endswith("/v1") else normalized.rstrip("/")
+
+
+def port_from_base_url(base_url: str) -> int | None:
     try:
-        url = f"http://127.0.0.1:{port}/v1/models"
-        request = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read(10_000).decode("utf-8"))
-            return bool(data.get("data"))
+        parsed = urlparse(normalize_lmstudio_base_url(base_url))
+        return parsed.port
+    except Exception:
+        return None
+
+
+def openai_models_url(base_url: str) -> str:
+    return normalize_lmstudio_base_url(base_url).rstrip("/") + "/models"
+
+
+def rest_models_url(base_url: str) -> str:
+    return lmstudio_server_root(base_url).rstrip("/") + "/api/v1/models"
+
+
+def _request_json(url: str, timeout: float = 2.0):
+    import urllib.request
+    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        raw = response.read(100_000).decode("utf-8", errors="replace")
+    return json.loads(raw) if raw.strip() else {}
+
+
+def is_lmstudio_base_url_available(base_url: str, timeout: float = 2.0) -> bool:
+    for url in (rest_models_url(base_url), openai_models_url(base_url)):
+        try:
+            data = _request_json(url, timeout=timeout)
+            if isinstance(data, list) or (
+                isinstance(data, dict) and (data.get("models") is not None or data.get("data") is not None)
+            ):
+                port = port_from_base_url(base_url)
+                if port is not None:
+                    _save_port(port, "probe")
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _try_port(port: int, timeout: int = 2) -> bool:
+    try:
+        return is_lmstudio_base_url_available(f"http://127.0.0.1:{port}/v1", timeout=timeout)
     except Exception:
         return False
 
@@ -73,23 +127,21 @@ def detect_port_from_processes() -> int | None:
 
 
 def detect_lmstudio_port() -> int:
-    """Auto-detect LM Studio port with fallback chain.
-
-    Priority:
-    1. Environment variable LMSTUDIO_BASE_URL
-    2. Common ports (1234, 11434, etc.)
-    3. Running process detection
-    4. Port history file
-    5. Default port (1234)
-    """
+    """Auto-detect LM Studio port with fallback chain."""
     env_url = os.getenv("LMSTUDIO_BASE_URL", "")
     if env_url:
-        match = re.search(r":(\d+)", env_url)
-        if match:
-            port = int(match.group(1))
+        port = port_from_base_url(env_url)
+        if port is not None:
             if _try_port(port):
                 _save_port(port, "env")
                 return port
+
+    history = _read_port_history()
+    for entry in reversed(history):
+        port = entry.get("port")
+        if isinstance(port, int) and _try_port(port):
+            _save_port(port, "history")
+            return port
 
     for port in COMMON_PORTS:
         if _try_port(port):
@@ -101,13 +153,21 @@ def detect_lmstudio_port() -> int:
         _save_port(detected, "process")
         return detected
 
-    history = _read_port_history()
-    for entry in reversed(history):
-        port = entry.get("port")
-        if isinstance(port, int) and _try_port(port):
-            return port
-
     return DEFAULT_PORT
+
+
+def detect_lmstudio_base_url(configured_url: str | None = None) -> tuple[str, str, bool]:
+    configured = normalize_lmstudio_base_url(configured_url)
+    if configured_url and is_lmstudio_base_url_available(configured):
+        port = port_from_base_url(configured)
+        if port is not None:
+            _save_port(port, "configured")
+        return configured, "configured", True
+
+    port = detect_lmstudio_port()
+    detected = normalize_lmstudio_base_url(f"http://127.0.0.1:{port}/v1")
+    found = is_lmstudio_base_url_available(detected)
+    return detected, "auto" if found else "default", found
 
 
 def remember_port(port: int) -> None:

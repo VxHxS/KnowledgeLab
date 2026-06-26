@@ -1,5 +1,13 @@
 $ErrorActionPreference = "Stop"
 
+$liveRoot = "C:\MyFiles\KnowledgeLab"
+$liveScript = Join-Path $liveRoot "LightRAG-Desktop\LightRAG-Desktop-Chat.ps1"
+if (Test-Path -LiteralPath $liveScript) {
+    Set-Location -LiteralPath $liveRoot
+    & $liveScript
+    exit $LASTEXITCODE
+}
+
 $freelance = Join-Path $env:USERPROFILE "Documents\Freelance"
 $latest = Get-ChildItem -Path $freelance -Directory -Filter "KnowledgeLab-staging-*" -ErrorAction SilentlyContinue |
     Sort-Object Name -Descending | Select-Object -First 1

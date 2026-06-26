@@ -763,6 +763,7 @@ class KnowledgeChatApp:
         self.root.configure(bg=UI_THEME["app_bg"])
 
         self.settings = self.load_settings()
+        self.ensure_detected_obsidian_path_setting()
         self.save_settings()
         self.context_var = tk.StringVar(value="Auto")
         self.lightrag_var = tk.BooleanVar(value=bool(self.settings["use_lightrag"]))
@@ -828,6 +829,9 @@ class KnowledgeChatApp:
         self.status_animation_id: str | None = None
         self.status_animation_step = 0
         self.busy_status_base = ""
+        self.chat_edge_stop_after_id: str | None = None
+        self.chat_edge_started_at = 0.0
+        self.chat_edge_min_visible_ms = 1800
         self.background_tasks: dict[str, BackgroundTaskRecord] = {}
         self.last_book_discovery_report: BookDiscoveryReport | None = None
         self.dnd_backend = "none"
@@ -869,6 +873,13 @@ class KnowledgeChatApp:
 
     def load_settings(self) -> dict[str, object]:
         return load_settings_standalone()
+
+    def ensure_detected_obsidian_path_setting(self) -> str:
+        configured = str(self.settings.get("obsidian_path", "") or "").strip()
+        detected = find_obsidian_path_standalone(configured)
+        if detected and detected != configured:
+            self.settings["obsidian_path"] = detected
+        return detected or configured
 
     def save_settings(self) -> None:
         save_settings_standalone(self.settings)
@@ -1046,6 +1057,9 @@ class KnowledgeChatApp:
             width=20,
         )
         self.context_selector.grid(row=0, column=3, sticky="w", padx=(0, 14))
+        self.context_selector.bind("<MouseWheel>", lambda _event: "break")
+        self.context_selector.bind("<Button-4>", lambda _event: "break")
+        self.context_selector.bind("<Button-5>", lambda _event: "break")
         self.add_tooltip(self.context_selector, "Контекст ответа. Finished Projects ищет только в отдельном слое готовых проектов.")
 
         ttk.Label(toolbar, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=4, sticky="e", padx=(0, 10))
@@ -1120,10 +1134,12 @@ class KnowledgeChatApp:
         chat_shell = AnimatedEdgeFrame(
             chat_shadow,
             background=UI_THEME["chat_bg"],
-            border="#aec5d4",
-            thickness=6,
+            border="#c4d4df",
+            thickness=2,
             animated=True,
+            active=False,
         )
+        self.chat_edge_frame = chat_shell
         chat_shell.grid(row=0, column=0, sticky="nsew", padx=(0, 2), pady=(0, 2))
         chat_content = chat_shell.content
         chat_content.columnconfigure(0, weight=1)
@@ -1141,6 +1157,9 @@ class KnowledgeChatApp:
             foreground="#202124",
             insertbackground="#202124",
             font=("Segoe UI", 10),
+            undo=True,
+            autoseparators=True,
+            maxundo=-1,
         )
         self.chat.grid(row=0, column=0, sticky="nsew")
         scroll = ttk.Scrollbar(chat_content, orient="vertical", command=self.chat.yview)
@@ -1232,10 +1251,7 @@ class KnowledgeChatApp:
         self.input.bind("<Alt-Up>", lambda _event: self.navigate_input_history(-1))
         self.input.bind("<Alt-Down>", lambda _event: self.navigate_input_history(1))
         self.input.bind("<KeyRelease>", self.update_char_count)
-        self.input.bind("<Control-c>", lambda _event: self._copy_selection(self.input))
-        self.input.bind("<Control-v>", lambda _event: self._paste_to_input())
-        self.input.bind("<Control-a>", lambda _event: self._select_all(self.input))
-        self.chat.bind("<Control-c>", lambda _event: self._copy_selection(self.chat))
+        self.install_clipboard_shortcuts()
 
         char_count_frame = tk.Frame(input_frame, bg="#ffffff")
         char_count_frame.grid(row=1, column=0, sticky="ew", padx=1, pady=(0, 1))
@@ -1529,19 +1545,19 @@ class KnowledgeChatApp:
         return ok
 
     def lmstudio_base_url(self) -> str:
-        configured = str(self.settings.get("lmstudio_base_url", "") or "").rstrip("/")
-        if configured:
-            import urllib.request
-            try:
-                urllib.request.urlopen(f"{configured}/v1/models", timeout=3)
-                return configured
-            except Exception:
-                pass
-        from knowledgelab.llm.port_detector import detect_lmstudio_port
-        port = detect_lmstudio_port()
-        base_url = f"http://127.0.0.1:{port}/v1"
-        self.settings["lmstudio_base_url"] = base_url
-        self.save_settings()
+        from knowledgelab.llm.port_detector import detect_lmstudio_base_url, is_lmstudio_base_url_available, normalize_lmstudio_base_url
+        configured = normalize_lmstudio_base_url(str(self.settings.get("lmstudio_base_url", "") or ""))
+        if is_lmstudio_base_url_available(configured, timeout=2):
+            base_url = configured
+        else:
+            base_url, _source, found = detect_lmstudio_base_url(configured)
+            if not found and configured:
+                base_url = configured
+        if self.settings.get("lmstudio_base_url") != base_url:
+            self.settings["lmstudio_base_url"] = base_url
+            self.save_settings()
+        if getattr(self, "_model_manager", None) is not None:
+            self._model_manager.base_url = base_url.rstrip("/")
         return base_url
 
     def llm_model_id(self) -> str:
@@ -1748,13 +1764,12 @@ class KnowledgeChatApp:
             self.append(f"{clean_text}\n", "warning")
 
     def start_thinking_animation(self) -> None:
-        """Show a thinking bubble with animation while model processes."""
-        self._thinking_bubble = self.append_dialog_bubble("...", "assistant", animated=True)
-        if hasattr(self, "_thinking_bubble") and self._thinking_bubble:
-            self._thinking_bubble.start_animation()
+        """Enable the chat edge animation while model processes."""
+        self.set_chat_edge_animation(True)
 
     def _stop_thinking_animation(self) -> None:
-        """Stop animation on thinking bubble and remove it."""
+        """Stop any transient thinking indicator."""
+        self.set_chat_edge_animation(False)
         bubble = getattr(self, "_thinking_bubble", None)
         if bubble:
             bubble.stop_animation()
@@ -1765,6 +1780,45 @@ class KnowledgeChatApp:
             if bubble in self.chat_widgets:
                 self.chat_widgets.remove(bubble)
             self._thinking_bubble = None
+
+    def set_chat_edge_animation(self, active: bool, *, min_visible: bool = True) -> None:
+        frame = getattr(self, "chat_edge_frame", None)
+        if frame is None:
+            return
+        if active:
+            if self.chat_edge_stop_after_id:
+                try:
+                    self.root.after_cancel(self.chat_edge_stop_after_id)
+                except tk.TclError:
+                    pass
+                self.chat_edge_stop_after_id = None
+            self.chat_edge_started_at = time.monotonic()
+            frame.set_active(True)
+            return
+
+        def stop_if_idle() -> None:
+            self.chat_edge_stop_after_id = None
+            if not self.busy:
+                frame.set_active(False)
+
+        if not min_visible:
+            stop_if_idle()
+            return
+        elapsed_ms = int((time.monotonic() - self.chat_edge_started_at) * 1000) if self.chat_edge_started_at else self.chat_edge_min_visible_ms
+        delay_ms = max(0, self.chat_edge_min_visible_ms - elapsed_ms)
+        if delay_ms <= 0:
+            stop_if_idle()
+            return
+        self.chat_edge_stop_after_id = self.root.after(delay_ms, stop_if_idle)
+
+    def preview_chat_edge_animation(self, duration_ms: int = 4200) -> None:
+        self.set_chat_edge_animation(True)
+
+        def stop_preview() -> None:
+            if not self.busy:
+                self.set_chat_edge_animation(False, min_visible=False)
+
+        self.root.after(duration_ms, stop_preview)
 
     def append_material_routing_report(self, reports: list[MaterialRoutingReport]) -> None:
         detail = str(self.settings.get("message_detail_level", "compact"))
@@ -1947,10 +2001,21 @@ class KnowledgeChatApp:
 
     def clear_input(self) -> None:
         self.input.delete("1.0", "end")
+        try:
+            self.input.edit_reset()
+        except tk.TclError:
+            pass
+        self.update_char_count()
 
     def replace_input(self, text: str) -> None:
         self.clear_input()
         self.input.insert("1.0", text)
+        try:
+            self.input.edit_reset()
+            self.input.edit_separator()
+        except tk.TclError:
+            pass
+        self.update_char_count()
 
     def append_to_input(self, text: str) -> None:
         clean_text = text.strip()
@@ -1960,6 +2025,11 @@ class KnowledgeChatApp:
             self.input.insert("end", "\n" + clean_text)
         else:
             self.input.insert("1.0", clean_text)
+        try:
+            self.input.edit_separator()
+        except tk.TclError:
+            pass
+        self.update_char_count()
         self.input.focus_set()
 
     def start_voice_input(self) -> None:
@@ -2103,6 +2173,10 @@ class KnowledgeChatApp:
 
     def is_language_preference_intent(self, text: str) -> bool:
         return is_russian_language_request(text)
+
+    def is_animation_preview_intent(self, text: str) -> bool:
+        compact = compact_text(text).lower()
+        return any(term in compact for term in ("перелив", "анимац рам", "рамк анимац", "shimmer", "border animation"))
 
     def wants_knowledge_lookup(self, text: str) -> bool:
         return is_knowledge_lookup_text(text) or is_finished_project_lookup_text(text)
@@ -2661,7 +2735,138 @@ class KnowledgeChatApp:
         except Exception:
             pass
 
-    def _copy_selection(self, widget: tk.Text) -> None:
+    def install_clipboard_shortcuts(self) -> None:
+        """Install reliable copy/cut/paste shortcuts for English and Russian layouts."""
+        input_sequences = {
+            "<<Copy>>": lambda _event: self._copy_selection(self.input),
+            "<<Cut>>": lambda _event: self._cut_selection(self.input),
+            "<<Paste>>": lambda _event: self._paste_to_input(),
+            "<<Undo>>": lambda _event: self._undo_input(),
+            "<<Redo>>": lambda _event: self._redo_input(),
+            "<Control-Insert>": lambda _event: self._copy_selection(self.input),
+            "<Shift-Insert>": lambda _event: self._paste_to_input(),
+        }
+        for sequence, callback in input_sequences.items():
+            self.input.bind(sequence, callback)
+        self.input.bind("<Control-KeyPress>", self._on_input_control_key)
+
+        chat_sequences = {
+            "<<Copy>>": lambda _event: self._copy_selection(self.chat),
+            "<Control-Insert>": lambda _event: self._copy_selection(self.chat),
+        }
+        for sequence, callback in chat_sequences.items():
+            self.chat.bind(sequence, callback)
+        self.chat.bind("<Control-KeyPress>", self._on_chat_control_key)
+
+        self.input_context_menu = tk.Menu(self.root, tearoff=False)
+        self.input_context_menu.add_command(label="Отменить", command=self._undo_input)
+        self.input_context_menu.add_command(label="Повторить", command=self._redo_input)
+        self.input_context_menu.add_separator()
+        self.input_context_menu.add_command(label="Вырезать", command=lambda: self._cut_selection(self.input))
+        self.input_context_menu.add_command(label="Копировать", command=lambda: self._copy_selection(self.input))
+        self.input_context_menu.add_command(label="Вставить", command=self._paste_to_input)
+        self.input_context_menu.add_separator()
+        self.input_context_menu.add_command(label="Выделить всё", command=lambda: self._select_all(self.input))
+        self.input.bind("<Button-3>", lambda event: self._show_context_menu(event, self.input_context_menu))
+
+        self.chat_context_menu = tk.Menu(self.root, tearoff=False)
+        self.chat_context_menu.add_command(label="Копировать", command=lambda: self._copy_selection(self.chat))
+        self.chat_context_menu.add_command(label="Выделить всё", command=lambda: self._select_all(self.chat))
+        self.chat.bind("<Button-3>", lambda event: self._show_context_menu(event, self.chat_context_menu))
+
+    def _show_context_menu(self, event: tk.Event, menu: tk.Menu) -> str:
+        try:
+            menu.tk_popup(int(event.x_root), int(event.y_root))
+        finally:
+            try:
+                menu.grab_release()
+            except tk.TclError:
+                pass
+        return "break"
+
+    def _clipboard_action_from_event(self, event: tk.Event) -> str:
+        keysym = str(getattr(event, "keysym", "") or "").lower()
+        char = str(getattr(event, "char", "") or "").lower()
+        try:
+            keycode = int(getattr(event, "keycode", 0) or 0)
+        except (TypeError, ValueError):
+            keycode = 0
+        physical = {65: "select_all", 67: "copy", 86: "paste", 88: "cut", 89: "redo", 90: "undo"}
+        symbolic = {
+            "a": "select_all",
+            "c": "copy",
+            "v": "paste",
+            "x": "cut",
+            "y": "redo",
+            "z": "undo",
+            "ф": "select_all",
+            "с": "copy",
+            "м": "paste",
+            "ч": "cut",
+            "н": "redo",
+            "я": "undo",
+            "cyrillic_ef": "select_all",
+            "cyrillic_es": "copy",
+            "cyrillic_em": "paste",
+            "cyrillic_che": "cut",
+            "cyrillic_en": "redo",
+            "cyrillic_ya": "undo",
+        }
+        return symbolic.get(keysym) or symbolic.get(char) or physical.get(keycode, "")
+
+    def _event_has_shift(self, event: tk.Event) -> bool:
+        try:
+            return bool(int(getattr(event, "state", 0) or 0) & 0x0001)
+        except (TypeError, ValueError):
+            return False
+
+    def _on_input_control_key(self, event: tk.Event) -> str | None:
+        action = self._clipboard_action_from_event(event)
+        if action == "select_all":
+            return self._select_all(self.input)
+        if action == "copy":
+            return self._copy_selection(self.input)
+        if action == "cut":
+            return self._cut_selection(self.input)
+        if action == "paste":
+            return self._paste_to_input()
+        if action == "undo":
+            return self._redo_input() if self._event_has_shift(event) else self._undo_input()
+        if action == "redo":
+            return self._redo_input()
+        return None
+
+    def _on_chat_control_key(self, event: tk.Event) -> str | None:
+        action = self._clipboard_action_from_event(event)
+        if action == "select_all":
+            return self._select_all(self.chat)
+        if action == "copy":
+            return self._copy_selection(self.chat)
+        if action == "paste":
+            try:
+                self.input.focus_set()
+            except tk.TclError:
+                pass
+            return self._paste_to_input()
+        return None
+
+    def _undo_input(self) -> str:
+        try:
+            self.input.edit_undo()
+            self.update_char_count()
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _redo_input(self) -> str:
+        try:
+            self.input.edit_redo()
+            self.update_char_count()
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _copy_selection(self, widget: tk.Text) -> str:
         try:
             if widget.tag_ranges("sel"):
                 text = widget.get("sel.first", "sel.last")
@@ -2669,20 +2874,44 @@ class KnowledgeChatApp:
                 self.root.clipboard_append(text)
         except tk.TclError:
             pass
+        return "break"
 
-    def _paste_to_input(self) -> None:
+    def _cut_selection(self, widget: tk.Text) -> str:
+        if widget is not self.input:
+            return self._copy_selection(widget)
+        try:
+            if widget.tag_ranges("sel"):
+                text = widget.get("sel.first", "sel.last")
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+                widget.delete("sel.first", "sel.last")
+                widget.edit_separator()
+                self.update_char_count()
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _paste_to_input(self) -> str:
         try:
             text = self.root.clipboard_get()
             if text:
+                if self.input.tag_ranges("sel"):
+                    self.input.delete("sel.first", "sel.last")
                 self.input.insert("insert", text)
+                self.input.edit_separator()
+                self.update_char_count()
         except tk.TclError:
             pass
+        return "break"
 
-    def _select_all(self, widget: tk.Text) -> None:
+    def _select_all(self, widget: tk.Text) -> str:
         try:
-            widget.tag_add("sel", "1.0", "end")
+            widget.tag_add("sel", "1.0", "end-1c")
+            widget.mark_set("insert", "1.0")
+            widget.see("insert")
         except tk.TclError:
             pass
+        return "break"
 
     def on_ctrl_return(self, _event: tk.Event | None = None) -> str:
         self.on_send()
@@ -2724,6 +2953,11 @@ class KnowledgeChatApp:
 
         if self.is_lightrag_help_intent(question):
             self.append_assistant_message(self.lightrag_help_message(), lightrag_used=False)
+            return
+
+        if self.is_animation_preview_intent(question):
+            self.preview_chat_edge_animation()
+            self.append_assistant_message("Показываю перелив по рамке на несколько секунд.", lightrag_used=False)
             return
 
         manual_book_entries = parse_manual_book_entries(question)
@@ -2916,7 +3150,6 @@ class KnowledgeChatApp:
     def finish_query(self, operation_id: int, output: str, tag: str, warnings: list[str], lightrag_used: bool = False) -> None:
         if not self.is_active_operation(operation_id):
             return
-        self._stop_thinking_animation()
         self.append_assistant_message(output, tag, warnings=warnings, lightrag_used=lightrag_used)
         for warning in warnings:
             self.append_warning_message(warning)
@@ -3022,6 +3255,7 @@ class KnowledgeChatApp:
             self.folder_attach_button.configure(state=state)
         if hasattr(self, "voice_button"):
             self.voice_button.configure(state="normal" if self.voice_operation_id is not None else state)
+        self.set_chat_edge_animation(busy)
         if not busy:
             self.cancel_busy_timer()
             self.set_active_process(None)
@@ -3213,13 +3447,13 @@ def run_static_self_test() -> int:
             routing_report = format_material_routing_report([
                 MaterialRoutingReport("self-test.md", "article", topic, "Topics/self-test.md", True)
             ])
-            if "Разложено по темам" not in routing_report:
+            if "Сохранено:" not in routing_report or topic not in routing_report:
                 raise AssertionError("material routing report formatting failed")
 
             book_report = format_book_discovery_report(
                 BookDiscoveryReport("00 Inbox/Images/self-test.md", books, parsed.get("unresolved", []), [])
             )
-            if "Отчёт по книгам" not in book_report:
+            if "Clean Code" not in book_report:
                 raise AssertionError("book discovery report formatting failed")
 
         print("KnowledgeLab self-test OK")

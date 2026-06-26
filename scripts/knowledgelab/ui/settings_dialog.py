@@ -11,6 +11,8 @@ from knowledgelab.config import (
     DEFAULT_SETTINGS,
     DEFAULT_VAULT_DIR,
 )
+from knowledgelab.i18n.messages import msg
+from knowledgelab.llm.lmstudio import available_lmstudio_models, ranked_lmstudio_models
 from knowledgelab.utils.colors import valid_hex_color, adjust_hex_color, readable_text_color
 from knowledgelab.ui.settings import color_preset_name
 
@@ -53,7 +55,10 @@ class SettingsDialog:
         self.app.book_lookup_enabled_var.set(bool(s.get("book_lookup_enabled", True)))
         self.app.web_search_enabled_var.set(bool(s.get("web_search_enabled", False)))
         self.app.button_color_var.set(str(s["button_color"]))
-        self.app.obsidian_path_var.set(str(s.get("obsidian_path", "")))
+        detected_obsidian = self.app.ensure_detected_obsidian_path_setting()
+        if detected_obsidian:
+            self.app.save_settings()
+        self.app.obsidian_path_var.set(detected_obsidian)
         self.app.vault_path_var.set(str(s.get("vault_path", str(DEFAULT_VAULT_DIR))))
         self.app.settings_status_var.set("")
 
@@ -143,80 +148,100 @@ class SettingsDialog:
     def _build_models_section(self, frame: ttk.Frame) -> None:
         ttk.Label(frame, text="Модели LM Studio", style="SettingsHeader.TLabel").grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
-        models = self._fetch_lmstudio_models()
+        models, model_status = self._fetch_lmstudio_models()
+        llm_values = self._role_model_values(models, "llm", self.app.llm_model_var.get().strip())
+        vision_values = self._role_model_values(models, "vision", self.app.vision_model_var.get().strip())
+        embedding_values = self._role_model_values(models, "embedding", self.app.embedding_model_var.get().strip())
+        self._select_recommended_if_missing(self.app.llm_model_var, llm_values)
+        self._select_recommended_if_missing(self.app.vision_model_var, vision_values)
+        self._select_recommended_if_missing(self.app.embedding_model_var, embedding_values)
 
         ttk.Label(frame, text="LLM (чат, код, текст)", background="#f4f6f8").grid(row=13, column=0, columnspan=3, sticky="w")
-        llm_combo = ttk.Combobox(frame, textvariable=self.app.llm_model_var, values=models, width=52)
+        llm_combo = ttk.Combobox(frame, textvariable=self.app.llm_model_var, values=llm_values, width=52)
         llm_combo.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(0, 6))
 
         ttk.Label(frame, text="Vision (фото, OCR)", background="#f4f6f8").grid(row=15, column=0, columnspan=3, sticky="w")
-        vision_combo = ttk.Combobox(frame, textvariable=self.app.vision_model_var, values=models, width=52)
+        vision_combo = ttk.Combobox(frame, textvariable=self.app.vision_model_var, values=vision_values, width=52)
         vision_combo.grid(row=16, column=0, columnspan=3, sticky="ew", pady=(0, 6))
 
         ttk.Label(frame, text="Embeddings (поиск по базе)", background="#f4f6f8").grid(row=17, column=0, columnspan=3, sticky="w")
-        embed_combo = ttk.Combobox(frame, textvariable=self.app.embedding_model_var, values=models, width=52)
+        embed_combo = ttk.Combobox(frame, textvariable=self.app.embedding_model_var, values=embedding_values, width=52)
         embed_combo.grid(row=18, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+        self._disable_combobox_wheel(llm_combo, vision_combo, embed_combo)
 
         auto_switch_check = ttk.Checkbutton(frame, text="Автопереключение моделей", variable=self.app.auto_switch_models_var)
         auto_switch_check.grid(row=19, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_switch_check, "KnowledgeLab автоматически загружает нужную модель перед каждым запросом. Отключите, если хотите переключать модели вручную в LM Studio.", delay_ms=1000)
 
-        ttk.Separator(frame, orient="horizontal").grid(row=20, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+        ttk.Label(frame, text=model_status, style="SettingsStatus.TLabel", wraplength=430).grid(row=20, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
-    def _fetch_lmstudio_models(self) -> list[str]:
+        ttk.Separator(frame, orient="horizontal").grid(row=21, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+
+    def _fetch_lmstudio_models(self) -> tuple[list[str], str]:
         """Fetch available model IDs from LM Studio API."""
-        import urllib.request
-        import json
-        base_url = str(self.app.settings.get("lmstudio_base_url", "") or "").rstrip("/")
-        if not base_url:
-            from knowledgelab.llm.port_detector import detect_lmstudio_port
-            port = detect_lmstudio_port()
-            base_url = f"http://127.0.0.1:{port}/v1"
         try:
-            url = f"{base_url}/v1/models"
-            request = urllib.request.Request(url, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(request, timeout=5) as response:
-                data = json.loads(response.read(50_000).decode("utf-8"))
-                models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
-                return sorted(models)
-        except Exception:
-            return []
+            base_url = self.app.lmstudio_base_url()
+            models = available_lmstudio_models(base_url)
+        except Exception as exc:
+            reason = str(exc).splitlines()[0][:140] or type(exc).__name__
+            return [], msg("settings.models_unavailable", reason=reason)
+        if models:
+            return models, msg("settings.models_found", count=len(models), base_url=base_url)
+        return [], msg("settings.models_empty", base_url=base_url)
+
+    def _role_model_values(self, models: list[str], role: str, current: str) -> list[str]:
+        values = ranked_lmstudio_models(models, role)
+        if current and current not in values:
+            values.insert(0, current)
+        return values
+
+    def _select_recommended_if_missing(self, variable: tk.StringVar, values: list[str]) -> None:
+        current = variable.get().strip()
+        if values and (not current or current not in values):
+            variable.set(values[0])
+
+    def _disable_combobox_wheel(self, *widgets: ttk.Combobox) -> None:
+        for widget in widgets:
+            widget.bind("<MouseWheel>", lambda _event: "break")
+            widget.bind("<Button-4>", lambda _event: "break")
+            widget.bind("<Button-5>", lambda _event: "break")
 
     def _build_color_section(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, text="Цвет основной кнопки", style="SettingsHeader.TLabel").grid(row=21, column=0, columnspan=3, sticky="w", pady=(0, 10))
+        ttk.Label(frame, text="Цвет основной кнопки", style="SettingsHeader.TLabel").grid(row=22, column=0, columnspan=3, sticky="w", pady=(0, 10))
         preset_var = tk.StringVar(value=color_preset_name(self.app.button_color_var.get()))
         preset = ttk.Combobox(frame, textvariable=preset_var, values=list(BUTTON_COLOR_PRESETS.keys()), state="readonly", width=18)
-        preset.grid(row=22, column=0, sticky="w", padx=(0, 10))
+        preset.grid(row=23, column=0, sticky="w", padx=(0, 10))
         preset.bind("<<ComboboxSelected>>", lambda _event: self.select_color_preset(preset_var.get()))
+        self._disable_combobox_wheel(preset)
         self.color_preview = tk.Label(frame, width=6, height=1, background=self.app.button_color_var.get(), relief="solid", borderwidth=1)
-        self.color_preview.grid(row=22, column=1, sticky="w", padx=(0, 10))
-        ttk.Button(frame, text="Выбрать...", command=self.choose_button_color).grid(row=22, column=2, sticky="e")
+        self.color_preview.grid(row=23, column=1, sticky="w", padx=(0, 10))
+        ttk.Button(frame, text="Выбрать...", command=self.choose_button_color).grid(row=23, column=2, sticky="e")
 
-        ttk.Separator(frame, orient="horizontal").grid(row=23, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+        ttk.Separator(frame, orient="horizontal").grid(row=24, column=0, columnspan=3, sticky="ew", pady=(14, 12))
 
     def _build_automation_section(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, text="Автоматизация", style="SettingsHeader.TLabel").grid(row=24, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(frame, text="Автоматизация", style="SettingsHeader.TLabel").grid(row=25, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
         auto_route_check = ttk.Checkbutton(frame, text="Автоматически распределять материалы по темам", variable=self.app.auto_route_topics_var)
-        auto_route_check.grid(row=25, column=0, columnspan=3, sticky="w", pady=3)
+        auto_route_check.grid(row=26, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_route_check, "KnowledgeLab сам выбирает тему и проект для новых материалов, а потом показывает в чате отчёт, куда всё разложено.", delay_ms=1000)
 
         auto_create_check = ttk.Checkbutton(frame, text="Автоматически создавать новые темы", variable=self.app.auto_create_topics_var)
-        auto_create_check.grid(row=26, column=0, columnspan=3, sticky="w", pady=3)
+        auto_create_check.grid(row=27, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_create_check, "Если подходящей темы ещё нет, будет создана папка Topics/<тема> и служебная заметка _Topic.md.", delay_ms=1000)
 
         auto_books_check = ttk.Checkbutton(frame, text="Автоматически искать книги по фото", variable=self.app.auto_detect_books_var)
-        auto_books_check.grid(row=27, column=0, columnspan=3, sticky="w", pady=3)
+        auto_books_check.grid(row=28, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_books_check, "Для фото книжной полки или обложки локальная vision-модель пытается прочитать корешки/названия и добавить найденные книги в 50 Library.", delay_ms=1000)
 
         book_lookup_check = ttk.Checkbutton(frame, text="Обогащать книги через онлайн-каталоги", variable=self.app.book_lookup_enabled_var)
-        book_lookup_check.grid(row=28, column=0, columnspan=3, sticky="w", pady=3)
+        book_lookup_check.grid(row=29, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(book_lookup_check, "Онлайн-каталоги помогают уточнить автора, ISBN, обложку и год. Сейчас используются Open Library (открытый книжный каталог Internet Archive) и Google Books. Если совпадение слабое, чат попросит уточнить книгу.", delay_ms=1000)
 
     def _build_buttons(self, frame: ttk.Frame) -> None:
-        ttk.Label(frame, textvariable=self.app.settings_status_var, style="SettingsStatus.TLabel").grid(row=29, column=0, columnspan=3, sticky="w", pady=(14, 0))
+        ttk.Label(frame, textvariable=self.app.settings_status_var, style="SettingsStatus.TLabel").grid(row=30, column=0, columnspan=3, sticky="w", pady=(14, 0))
         buttons = ttk.Frame(frame, style="App.TFrame")
-        buttons.grid(row=30, column=0, columnspan=3, sticky="ew", pady=(16, 0))
+        buttons.grid(row=31, column=0, columnspan=3, sticky="ew", pady=(16, 0))
         ttk.Button(buttons, text="Сбросить настройки", command=self.reset).grid(row=0, column=0, sticky="w")
         ttk.Button(buttons, text="Отмена", command=self.close).grid(row=0, column=1, padx=(0, 8))
         ttk.Button(buttons, text="Сохранить", command=self.save).grid(row=0, column=2)
