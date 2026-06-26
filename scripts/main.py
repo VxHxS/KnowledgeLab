@@ -1720,7 +1720,7 @@ class KnowledgeChatApp:
         if not clean_text:
             return
         if tag in {"assistant", "error"}:
-            self.append_dialog_bubble(clean_text, tag, animated=persist if animated is None else animated)
+            self.append_dialog_bubble(clean_text, tag, animated=False)
         else:
             self.append(f"{clean_text}\n", tag)
         if persist:
