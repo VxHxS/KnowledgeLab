@@ -762,37 +762,36 @@ def format_book_discovery_report(report: BookDiscoveryReport, detail: str = "ful
     lines: list[str] = []
 
     if added:
-        in_vault: list[dict[str, object]] = []
-        new_books: list[dict[str, object]] = []
-
-        for book in added:
-            existing = find_existing_book_note(book)
-            if existing:
-                book["_vault_note"] = existing
-                in_vault.append(book)
-            else:
-                new_books.append(book)
+        in_vault = [book for book in added if bool(book.get("already_in_vault"))]
+        new_books = [book for book in added if not bool(book.get("already_in_vault"))]
 
         lines.append(f"Определено книг: {len(added)}")
+        lines.append(f"Добавлено сейчас: {len(new_books)}")
+        lines.append(f"Уже есть в базе: {len(in_vault)}")
         lines.append("")
 
         index = 1
         if new_books:
+            lines.append("Добавлено:")
             for book in new_books[:20]:
                 title = str(book.get("title") or "?")
                 author = str(book.get("author") or "")
                 author_str = f" — {author}" if author else ""
-                lines.append(f"{index}. {title}{author_str}")
+                note = str(book.get("vault_note") or "")
+                link = f" -> [[{note}]]" if note else ""
+                lines.append(f"{index}. {title}{author_str}{link}")
                 index += 1
 
         if in_vault:
             lines.append("")
-            lines.append(f"Уже в Obsidian ({len(in_vault)}):")
+            lines.append(f"Уже в Obsidian / базе ({len(in_vault)}):")
             for book in in_vault[:20]:
                 title = str(book.get("title") or "?")
                 author = str(book.get("author") or "")
                 author_str = f" — {author}" if author else ""
-                lines.append(f"  ✓ {title}{author_str}")
+                note = str(book.get("vault_note") or "")
+                link = f" -> [[{note}]]" if note else ""
+                lines.append(f"  ✓ {title}{author_str}{link}")
 
         if new_books:
             lines.append("")
@@ -1035,9 +1034,11 @@ def save_detected_book_notes(books: list[dict[str, object]], source_rel_path: st
         book["book_topic"] = str(book.get("book_topic") or classify_book_topic(book))
         existing = find_existing_book_note(book, vault_dir=vault_dir)
         if existing:
+            book["already_in_vault"] = True
             book["vault_note"] = existing
             saved.append(existing)
             continue
+        book["already_in_vault"] = False
         destination = vault_dir / "50 Library" / book_note_slug(book)
         destination.mkdir(parents=True, exist_ok=True)
         path = unique_path(destination / "Book.md")

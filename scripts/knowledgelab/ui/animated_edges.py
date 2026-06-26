@@ -39,10 +39,10 @@ class AnimatedEdgeFrame(tk.Frame):
         self.bottom = tk.Canvas(self, height=self.thickness, bg=self.border, highlightthickness=0, bd=0)
         self.content = tk.Frame(self, bg=self.background)
 
-        self._corner(0, 0)
-        self._corner(0, 2)
-        self._corner(2, 0)
-        self._corner(2, 2)
+        self.corner_tl = self._corner(0, 0)
+        self.corner_tr = self._corner(0, 2)
+        self.corner_bl = self._corner(2, 0)
+        self.corner_br = self._corner(2, 2)
         self.top.grid(row=0, column=1, sticky="ew")
         self.left.grid(row=1, column=0, sticky="ns")
         self.content.grid(row=1, column=1, sticky="nsew")
@@ -82,7 +82,7 @@ class AnimatedEdgeFrame(tk.Frame):
         self.stop_animation()
 
     def redraw(self) -> None:
-        for canvas in (self.top, self.left, self.right, self.bottom):
+        for canvas in self._border_canvases():
             canvas.delete("all")
             width = max(1, canvas.winfo_width())
             height = max(1, canvas.winfo_height())
@@ -91,10 +91,23 @@ class AnimatedEdgeFrame(tk.Frame):
         if self.animated and self._active:
             self._draw_shimmer()
 
-    def _corner(self, row: int, column: int) -> None:
-        frame = tk.Frame(self, bg=self.border, width=self.thickness, height=self.thickness)
-        frame.grid(row=row, column=column, sticky="nsew")
-        frame.grid_propagate(False)
+    def _border_canvases(self) -> tuple[tk.Canvas, ...]:
+        return (
+            self.top,
+            self.left,
+            self.right,
+            self.bottom,
+            self.corner_tl,
+            self.corner_tr,
+            self.corner_bl,
+            self.corner_br,
+        )
+
+    def _corner(self, row: int, column: int) -> tk.Canvas:
+        canvas = tk.Canvas(self, width=self.thickness, height=self.thickness, bg=self.border, highlightthickness=0, bd=0)
+        canvas.grid(row=row, column=column, sticky="nsew")
+        canvas.grid_propagate(False)
+        return canvas
 
     def _draw_shimmer(self) -> None:
         width = max(1.0, float(self.top.winfo_width()))
@@ -127,6 +140,7 @@ class AnimatedEdgeFrame(tk.Frame):
         perimeter = 2 * (width + height)
         distance %= perimeter
         center = max(0.5, self.thickness / 2)
+        self._draw_corner_markers(distance, length, color)
 
         if distance < width:
             start = min(width, max(0.0, distance))
@@ -149,6 +163,30 @@ class AnimatedEdgeFrame(tk.Frame):
         start = height - min(height, max(0.0, distance))
         end = max(0.0, start - length)
         self.left.create_line(center, start, center, end, fill=color, width=line_width, capstyle="round")
+
+    def _draw_corner_markers(self, distance: float, length: float, color: str) -> None:
+        width = max(1.0, float(self.top.winfo_width()))
+        height = max(1.0, float(self.left.winfo_height()))
+        perimeter = 2 * (width + height)
+        end = distance + length
+        spans = [(distance, min(end, perimeter))]
+        if end > perimeter:
+            spans.append((0.0, end - perimeter))
+        tolerance = max(3.0, float(self.thickness + 1))
+        corners = (
+            (0.0, self.corner_tl),
+            (width, self.corner_tr),
+            (width + height, self.corner_br),
+            (width + height + width, self.corner_bl),
+            (perimeter, self.corner_tl),
+        )
+        for boundary, canvas in corners:
+            if any(start - tolerance <= boundary <= stop + tolerance for start, stop in spans):
+                self._draw_corner_piece(canvas, color)
+
+    def _draw_corner_piece(self, canvas: tk.Canvas, color: str) -> None:
+        size = max(self.thickness, int(max(canvas.winfo_width(), canvas.winfo_height(), 1)))
+        canvas.create_rectangle(0, 0, size, size, fill=color, outline="")
 
     def _tick(self) -> None:
         if not self._active:

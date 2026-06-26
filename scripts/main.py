@@ -1148,7 +1148,7 @@ class KnowledgeChatApp:
         self.chat = tk.Text(
             chat_content,
             wrap="word",
-            state="disabled",
+            state="normal",
             padx=14,
             pady=14,
             relief="flat",
@@ -1252,6 +1252,7 @@ class KnowledgeChatApp:
         self.input.bind("<Alt-Down>", lambda _event: self.navigate_input_history(1))
         self.input.bind("<KeyRelease>", self.update_char_count)
         self.install_clipboard_shortcuts()
+        self.install_chat_readonly_bindings()
 
         char_count_frame = tk.Frame(input_frame, bg="#ffffff")
         char_count_frame.grid(row=1, column=0, sticky="ew", padx=1, pady=(0, 1))
@@ -1644,7 +1645,6 @@ class KnowledgeChatApp:
             except tk.TclError:
                 pass
         self.chat_widgets.clear()
-        self.chat.configure(state="disabled")
         chat = self.get_active_chat()
         messages = chat.get("messages", []) if chat else []
         if not messages:
@@ -1681,14 +1681,12 @@ class KnowledgeChatApp:
         self.chat.configure(state="normal")
         self.chat.delete("1.0", "end")
         self.chat.insert("end", text, tag)
-        self.chat.configure(state="disabled")
         self.chat.see("end")
 
     def append(self, text: str, tag: str = "assistant") -> None:
         self.chat.configure(state="normal")
         self.chat.insert("end", text, tag)
         self.chat.insert("end", "\n")
-        self.chat.configure(state="disabled")
         self.chat.see("end")
 
     def append_dialog_bubble(self, text: str, role: str, *, animated: bool = True) -> AnimatedMessageBubble:
@@ -1706,7 +1704,6 @@ class KnowledgeChatApp:
         self.chat.window_create("end", window=bubble)
         self.chat.insert("end", "\n")
         self.chat_widgets.append(bubble)
-        self.chat.configure(state="disabled")
         self.chat.see("end")
         return bubble
 
@@ -2428,9 +2425,11 @@ class KnowledgeChatApp:
                 self.ensure_topic_exists(str(book.get("book_topic") or "Library"), "library")
             existing = self.find_existing_book_note(book)
             if existing:
+                book["already_in_vault"] = True
                 book["vault_note"] = existing
                 saved.append(existing)
                 continue
+            book["already_in_vault"] = False
             destination = VAULT_DIR / "50 Library" / book_note_slug(book)
             destination.mkdir(parents=True, exist_ok=True)
             path = unique_path(destination / "Book.md")
@@ -2734,6 +2733,19 @@ class KnowledgeChatApp:
                 self.char_count_label.configure(text="")
         except Exception:
             pass
+
+    def install_chat_readonly_bindings(self) -> None:
+        def block_edit(event: tk.Event) -> str | None:
+            action = self._clipboard_action_from_event(event) if int(getattr(event, "state", 0) or 0) & 0x0004 else ""
+            if action in {"copy", "select_all"}:
+                return None
+            return "break"
+
+        self.chat.bind("<KeyPress>", block_edit)
+        self.chat.bind("<<Paste>>", lambda _event: "break")
+        self.chat.bind("<<Cut>>", lambda _event: "break")
+        self.chat.bind("<BackSpace>", lambda _event: "break")
+        self.chat.bind("<Delete>", lambda _event: "break")
 
     def install_clipboard_shortcuts(self) -> None:
         """Install reliable copy/cut/paste shortcuts for English and Russian layouts."""

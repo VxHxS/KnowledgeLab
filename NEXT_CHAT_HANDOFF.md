@@ -10,6 +10,11 @@ Active launcher note from the user: `C:\Users\Юрий\Desktop\LightRag` is wher
 
 Recent UI/runtime changes:
 
+- Follow-up 2026-06-26: the chat edge animation now paints the four corner cells as canvases too, so the moving runner does not disappear when it crosses a corner.
+- Follow-up 2026-06-26: chat transcript text stays selectable/copyable by keeping the Tk `Text` widget normal while blocking edit keys/paste/cut. This fixes mouse selection in the chat without making the transcript user-editable.
+- Follow-up 2026-06-26: bookshelf/photo book reports now separate newly created notes from books that were already present in `50 Library`, using `already_in_vault` / `vault_note` set at save time.
+- Follow-up 2026-06-26: LM Studio settings filter model dropdowns by role. Vision only shows vision-like models, embeddings only shows embedding models, and chat LLM excludes both. A configured vision model is considered ready only when it is actually loaded in LM Studio Local Server.
+- Current LM Studio smoke on this machine: neither `127.0.0.1:1234` nor `127.0.0.1:5000` was listening, so live connected models could not be read. Control smoke with sample model IDs returned LLM `qwen/qwen2.5-coder-32b`, `qwen/qwen3-14b`; Vision `qwen2.5-vl-7b-instruct`; Embeddings `text-embedding-nomic-embed-text-v1.5`.
 - The chat dialog border in `scripts\knowledgelab\ui\animated_edges.py` is now a thin static frame at idle.
 - Final UI setting: the dialog frame is `1px`; the animated runner is also capped to that thin width.
 - Follow-up fix: for `1px` frames the runner is drawn on the `0.5px` canvas center instead of the edge coordinate, so it is not clipped/invisible; palette contrast was slightly increased while keeping muted colors.

@@ -47,7 +47,6 @@ class ProjectActionPanel:
         self.app.chat.window_create("end", window=frame)
         self.app.chat.insert("end", "\n")
         self.app.chat_widgets.append(frame)
-        self.app.chat.configure(state="disabled")
         self.app.chat.see("end")
 
     def build_project(self, action_id: str) -> None:

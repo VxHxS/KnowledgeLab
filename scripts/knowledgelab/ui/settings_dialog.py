@@ -12,7 +12,7 @@ from knowledgelab.config import (
     DEFAULT_VAULT_DIR,
 )
 from knowledgelab.i18n.messages import msg
-from knowledgelab.llm.lmstudio import available_lmstudio_models, ranked_lmstudio_models
+from knowledgelab.llm.lmstudio import available_lmstudio_models, compatible_lmstudio_models
 from knowledgelab.utils.colors import valid_hex_color, adjust_hex_color, readable_text_color
 from knowledgelab.ui.settings import color_preset_name
 
@@ -190,15 +190,18 @@ class SettingsDialog:
         return [], msg("settings.models_empty", base_url=base_url)
 
     def _role_model_values(self, models: list[str], role: str, current: str) -> list[str]:
-        values = ranked_lmstudio_models(models, role)
-        if current and current not in values:
+        values = compatible_lmstudio_models(models, role)
+        if current and current in values:
             values.insert(0, current)
+            values = list(dict.fromkeys(values))
         return values
 
     def _select_recommended_if_missing(self, variable: tk.StringVar, values: list[str]) -> None:
         current = variable.get().strip()
         if values and (not current or current not in values):
             variable.set(values[0])
+        elif not values:
+            variable.set("")
 
     def _disable_combobox_wheel(self, *widgets: ttk.Combobox) -> None:
         for widget in widgets:

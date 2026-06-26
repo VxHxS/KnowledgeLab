@@ -155,8 +155,19 @@ def ranked_lmstudio_models(models: list[str], role: str) -> list[str]:
     return sorted(unique, key=lambda model: (-model_role_score(model, role), model.lower()))
 
 
+def compatible_lmstudio_models(models: list[str], role: str) -> list[str]:
+    unique = sorted({str(model).strip() for model in models if str(model).strip()})
+    if role == "vision":
+        filtered = [model for model in unique if is_vision_model_name(model)]
+    elif role == "embedding":
+        filtered = [model for model in unique if is_embedding_model_name(model)]
+    else:
+        filtered = [model for model in unique if not is_vision_model_name(model) and not is_embedding_model_name(model)]
+    return ranked_lmstudio_models(filtered, role)
+
+
 def recommended_lmstudio_model(models: list[str], role: str) -> str:
-    ranked = ranked_lmstudio_models(models, role)
+    ranked = compatible_lmstudio_models(models, role)
     return ranked[0] if ranked else ""
 
 
@@ -216,12 +227,11 @@ def vision_model_state(
     except Exception:
         models = []
     if configured:
-        return configured, True, models
+        return configured, is_vision_model_name(configured) and configured in models, models
     for model in models:
         if is_vision_model_name(model):
             return model, True, models
-    llm_model = str(settings.get("llm_model", "") or "")
-    return llm_model, False, models
+    return "", False, models
 
 
 def call_plain_lmstudio(
