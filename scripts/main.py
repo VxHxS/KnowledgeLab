@@ -1701,7 +1701,7 @@ class KnowledgeChatApp:
         clean_text = text.strip()
         if not clean_text:
             return
-        self.append_dialog_bubble(clean_text, "user", animated=persist if animated is None else animated)
+        self.append_dialog_bubble(clean_text, "user", animated=False)
         if persist:
             route = self.selected_route(clean_text)
             self.add_message("user", clean_text, route.context_name)
@@ -1755,8 +1755,6 @@ class KnowledgeChatApp:
             if bubble in self.chat_widgets:
                 self.chat_widgets.remove(bubble)
             self._thinking_bubble = None
-            if persist:
-                self.add_message("system", clean_text, "General")
 
     def append_material_routing_report(self, reports: list[MaterialRoutingReport]) -> None:
         detail = str(self.settings.get("message_detail_level", "compact"))
