@@ -571,19 +571,8 @@ class CaptureWorkflow:
             self.app.clear_input()
             display_names = saved_original_names[:5] if saved_original_names else [Path(p).stem[:20] for p in saved[:5]]
             message = f"Сохранил {len(saved)} файл(ов)."
-            if display_names:
-                message += "\n" + ", ".join(display_names)
-                if len(saved) > 5:
-                    message += f" и ещё {len(saved) - 5}"
-            if extracted_count:
-                from knowledgelab.material.queue import launch_reindex
-                launch_reindex(route)
-            if queued_processing_count:
-                message += "\nНекоторые файлы требуют обработки (OCR/парсинг)."
             if book_discovery_count:
-                message += f"\nИщу книги на {book_discovery_count} изображениях..."
-            if video_analysis_count:
-                message += f"\nАнализирую видео ({video_analysis_count} файлов)..."
+                message += f"\nИщу книги..."
             self.app.append_assistant_message(message, lightrag_used=False, project_action_id=project_action_ids[0] if project_action_ids else "")
             self.app.append_material_routing_report(routing_reports)
         if errors:

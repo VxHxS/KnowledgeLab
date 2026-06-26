@@ -740,24 +740,15 @@ def render_manual_book_resolution_section(entries: list[dict[str, object]], crea
     return "\n".join(lines)
 
 
-def format_material_routing_report(reports: list[MaterialRoutingReport], detail: str = "full") -> str:
+def format_material_routing_report(reports: list[MaterialRoutingReport], detail: str = "compact") -> str:
     if not reports:
         return ""
     grouped: dict[str, list[MaterialRoutingReport]] = {}
     for report in reports:
         grouped.setdefault(report.topic or "Unsorted", []).append(report)
-    if detail == "compact":
-        topic_parts = [f"{topic} ({len(items)})" for topic, items in sorted(grouped.items())]
-        total = sum(len(items) for items in grouped.values())
-        return f"Сохранено: {total} файл(ов) по темам: {', '.join(topic_parts)}."
-    lines = ["Разложено по темам:"]
-    for topic, items in sorted(grouped.items()):
-        lines.append(f"- {topic}: {len(items)} файл(ов)")
-        for item in items[:4]:
-            lines.append(f"  - {item.source_name}")
-        if len(items) > 4:
-            lines.append(f"  - ...и ещё {len(items) - 4}")
-    return "\n".join(lines)
+    topic_parts = [f"{topic} ({len(items)})" for topic, items in sorted(grouped.items())]
+    total = sum(len(items) for items in grouped.values())
+    return f"Сохранено: {total} файл(ов) по темам: {', '.join(topic_parts)}."
 
 
 def format_book_discovery_report(report: BookDiscoveryReport, detail: str = "full") -> str:
