@@ -1531,11 +1531,17 @@ class KnowledgeChatApp:
     def lmstudio_base_url(self) -> str:
         configured = str(self.settings.get("lmstudio_base_url", "") or "").rstrip("/")
         if configured:
-            return configured
+            import urllib.request
+            try:
+                urllib.request.urlopen(f"{configured}/v1/models", timeout=3)
+                return configured
+            except Exception:
+                pass
         from knowledgelab.llm.port_detector import detect_lmstudio_port
         port = detect_lmstudio_port()
         base_url = f"http://127.0.0.1:{port}/v1"
         self.settings["lmstudio_base_url"] = base_url
+        self.save_settings()
         return base_url
 
     def llm_model_id(self) -> str:
