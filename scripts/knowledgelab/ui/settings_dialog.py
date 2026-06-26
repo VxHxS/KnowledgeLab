@@ -169,7 +169,9 @@ class SettingsDialog:
         import json
         base_url = str(self.app.settings.get("lmstudio_base_url", "") or "").rstrip("/")
         if not base_url:
-            return []
+            from knowledgelab.llm.port_detector import detect_lmstudio_port
+            port = detect_lmstudio_port()
+            base_url = f"http://127.0.0.1:{port}/v1"
         try:
             url = f"{base_url}/v1/models"
             request = urllib.request.Request(url, headers={"Accept": "application/json"})
