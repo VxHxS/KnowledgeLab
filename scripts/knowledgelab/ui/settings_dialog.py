@@ -143,23 +143,42 @@ class SettingsDialog:
     def _build_models_section(self, frame: ttk.Frame) -> None:
         ttk.Label(frame, text="Модели LM Studio", style="SettingsHeader.TLabel").grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
+        models = self._fetch_lmstudio_models()
+
         ttk.Label(frame, text="LLM (чат, код, текст)", background="#f4f6f8").grid(row=13, column=0, columnspan=3, sticky="w")
-        llm_entry = ttk.Entry(frame, textvariable=self.app.llm_model_var, width=54)
-        llm_entry.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+        llm_combo = ttk.Combobox(frame, textvariable=self.app.llm_model_var, values=models, width=52)
+        llm_combo.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(0, 6))
 
         ttk.Label(frame, text="Vision (фото, OCR)", background="#f4f6f8").grid(row=15, column=0, columnspan=3, sticky="w")
-        vision_entry = ttk.Entry(frame, textvariable=self.app.vision_model_var, width=54)
-        vision_entry.grid(row=16, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+        vision_combo = ttk.Combobox(frame, textvariable=self.app.vision_model_var, values=models, width=52)
+        vision_combo.grid(row=16, column=0, columnspan=3, sticky="ew", pady=(0, 6))
 
         ttk.Label(frame, text="Embeddings (поиск по базе)", background="#f4f6f8").grid(row=17, column=0, columnspan=3, sticky="w")
-        embed_entry = ttk.Entry(frame, textvariable=self.app.embedding_model_var, width=54)
-        embed_entry.grid(row=18, column=0, columnspan=3, sticky="ew", pady=(0, 6))
+        embed_combo = ttk.Combobox(frame, textvariable=self.app.embedding_model_var, values=models, width=52)
+        embed_combo.grid(row=18, column=0, columnspan=3, sticky="ew", pady=(0, 6))
 
         auto_switch_check = ttk.Checkbutton(frame, text="Автопереключение моделей", variable=self.app.auto_switch_models_var)
         auto_switch_check.grid(row=19, column=0, columnspan=3, sticky="w", pady=3)
         self.app.add_tooltip(auto_switch_check, "KnowledgeLab автоматически загружает нужную модель перед каждым запросом. Отключите, если хотите переключать модели вручную в LM Studio.", delay_ms=1000)
 
         ttk.Separator(frame, orient="horizontal").grid(row=20, column=0, columnspan=3, sticky="ew", pady=(14, 12))
+
+    def _fetch_lmstudio_models(self) -> list[str]:
+        """Fetch available model IDs from LM Studio API."""
+        import urllib.request
+        import json
+        base_url = str(self.app.settings.get("lmstudio_base_url", "") or "").rstrip("/")
+        if not base_url:
+            return []
+        try:
+            url = f"{base_url}/v1/models"
+            request = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                data = json.loads(response.read(50_000).decode("utf-8"))
+                models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+                return sorted(models)
+        except Exception:
+            return []
 
     def _build_color_section(self, frame: ttk.Frame) -> None:
         ttk.Label(frame, text="Цвет основной кнопки", style="SettingsHeader.TLabel").grid(row=21, column=0, columnspan=3, sticky="w", pady=(0, 10))
