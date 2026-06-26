@@ -53,7 +53,7 @@ class AnimatedMessageBubble(tk.Canvas):
     _margin_x = 18
     _pad_x = 14
     _pad_y = 10
-    _frame_ms = 120
+    _frame_ms = 150
 
     def __init__(
         self,
@@ -73,6 +73,8 @@ class AnimatedMessageBubble(tk.Canvas):
         self._after_id: str | None = None
         self._phase = 0.0
         self._rect_coords = (0.0, 0.0, 0.0, 0.0)
+        self._line_positions: list[float] = []
+        self._line_colors: list[str] = []
 
         super().__init__(
             master,
@@ -88,7 +90,15 @@ class AnimatedMessageBubble(tk.Canvas):
     def start_animation(self) -> None:
         if self._after_id is None:
             self._phase = 0.0
+            self._init_line_positions()
             self._tick()
+
+    def _init_line_positions(self) -> None:
+        import random
+        random.seed(42)
+        num_lines = random.randint(2, 4)
+        self._line_positions = [random.random() for _ in range(num_lines)]
+        self._line_colors = [self.style.palette[i % len(self.style.palette)] for i in range(num_lines)]
 
     def stop_animation(self) -> None:
         if self._after_id is None:
@@ -172,7 +182,7 @@ class AnimatedMessageBubble(tk.Canvas):
         self.stop_animation()
 
     def _tick(self) -> None:
-        self._phase = (self._phase + 0.02) % 1.0
+        self._phase = (self._phase + 0.015) % 1.0
         self.redraw()
         self._after_id = self.after(self._frame_ms, self._tick)
 
@@ -183,22 +193,20 @@ class AnimatedMessageBubble(tk.Canvas):
         width = x2 - x1
         height = y2 - y1
         perimeter = 2 * (width + height)
-        num_lines = 4
-        inset = min(self._radius + 2, width / 4, height / 4)
-        for i in range(num_lines):
-            offset = (self._phase + i / num_lines) % 1.0
-            alpha = max(0.0, 1.0 - abs(offset * 2.0 - 1.0) * 1.8)
-            if alpha < 0.08:
+        inset = min(self._radius + 1, width / 5, height / 5)
+        for i, pos in enumerate(self._line_positions):
+            phase_offset = (self._phase + i * 0.37) % 1.0
+            alpha = max(0.0, 1.0 - abs(phase_offset * 2.0 - 1.0) * 2.0)
+            if alpha < 0.05:
                 continue
-            color_idx = int((self._phase + i * 0.25) * len(self.style.palette)) % len(self.style.palette)
-            color = self.style.palette[color_idx]
-            seg_len = perimeter * 0.08
-            start_dist = offset * perimeter
+            color = self._line_colors[i]
+            seg_len = perimeter * 0.06
+            center_dist = pos * perimeter
             points: list[float] = []
-            steps = 12
+            steps = 8
             for s in range(steps + 1):
                 frac = s / steps
-                dist = (start_dist + frac * seg_len) % perimeter
+                dist = (center_dist - seg_len / 2.0 + frac * seg_len) % perimeter
                 seg_alpha = alpha * (1.0 - abs(frac * 2.0 - 1.0))
                 if dist < width:
                     px = x1 + inset + (dist / width) * (width - 2 * inset)
@@ -217,7 +225,7 @@ class AnimatedMessageBubble(tk.Canvas):
                 self.create_line(
                     points,
                     fill=color,
-                    width=max(1, int(round(1.5 * alpha))),
+                    width=1,
                     smooth=True,
                     capstyle="round",
                 )
