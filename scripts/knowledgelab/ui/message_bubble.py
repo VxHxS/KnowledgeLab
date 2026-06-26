@@ -20,40 +20,40 @@ class MessageBubbleStyle:
 ROLE_STYLES = {
     "assistant": MessageBubbleStyle(
         fill="#ffffff",
-        border="#c0ceda",
+        border="#e0e7ee",
         text=UI_THEME["text"],
         max_width=680,
         align="left",
-        palette=("#5f8aa3", "#7d965f", "#9479ad", "#b4816e"),
+        palette=("#3b82f6", "#8b5cf6", "#06b6d4", "#10b981"),
     ),
     "user": MessageBubbleStyle(
-        fill="#f0f1f3",
-        border="#c8d2da",
-        text="#202124",
+        fill="#f0f4f8",
+        border="#d1d9e0",
+        text="#1a202c",
         max_width=560,
         align="right",
-        palette=("#5c879b", "#7f9c61", "#9a7caf", "#b9876f"),
+        palette=("#3b82f6", "#8b5cf6", "#06b6d4", "#10b981"),
     ),
     "error": MessageBubbleStyle(
-        fill="#fff6f4",
-        border="#e3c2bd",
-        text=UI_THEME["danger"],
+        fill="#fef2f2",
+        border="#fca5a5",
+        text="#dc2626",
         max_width=680,
         align="left",
-        palette=("#b45f54", "#ba8d43", "#799b80", "#8383a5"),
+        palette=("#ef4444", "#f97316", "#eab308", "#84cc16"),
     ),
 }
 
 
 class AnimatedMessageBubble(tk.Canvas):
-    """Chat bubble with a subtle animated edge accent."""
+    """Chat bubble with subtle edge animation when model is thinking."""
 
-    _radius = 12
+    _radius = 10
     _min_width = 220
     _margin_x = 18
     _pad_x = 14
     _pad_y = 10
-    _frame_ms = 55
+    _frame_ms = 60
 
     def __init__(
         self,
@@ -70,7 +70,6 @@ class AnimatedMessageBubble(tk.Canvas):
         self.style = ROLE_STYLES[self.role]
         self.canvas_width = max(430, int(canvas_width or 430))
         self.background = background or UI_THEME["chat_bg"]
-        self.animated = bool(animated)
         self._after_id: str | None = None
         self._phase = 0.0
         self._rect_coords = (0.0, 0.0, 0.0, 0.0)
@@ -85,12 +84,10 @@ class AnimatedMessageBubble(tk.Canvas):
         )
         self.bind("<Destroy>", self._on_destroy, add="+")
         self.redraw()
-        if self.animated:
-            self.start_animation()
 
     def start_animation(self) -> None:
         if self._after_id is None:
-            self._animation_ticks = 0
+            self._phase = 0.0
             self._tick()
 
     def stop_animation(self) -> None:
@@ -101,6 +98,8 @@ class AnimatedMessageBubble(tk.Canvas):
         except tk.TclError:
             pass
         self._after_id = None
+        self._rect_coords = (0.0, 0.0, 0.0, 0.0)
+        self.redraw()
 
     def redraw(self) -> None:
         self.delete("all")
@@ -143,8 +142,8 @@ class AnimatedMessageBubble(tk.Canvas):
         rect_id = self._rounded_rect(x1, y1, x2, y2)
         self.tag_lower(rect_id, text_id)
         self._rect_coords = (x1, y1, x2, y2)
-        if self.animated:
-            self._draw_shimmer()
+        if self._after_id is not None:
+            self._draw_thinking_pulse()
         self.tag_raise(text_id)
 
     def _bubble_width(self) -> int:
@@ -169,73 +168,42 @@ class AnimatedMessageBubble(tk.Canvas):
             )
         )
 
-    def _draw_shimmer(self) -> None:
-        x1, y1, x2, y2 = self._rect_coords
-        width = max(1.0, x2 - x1)
-        height = max(1.0, y2 - y1)
-        perimeter = 2 * (width + height)
-        runner_length = min(170.0, max(82.0, perimeter * 0.3))
-        color_index = int(self._phase * len(self.style.palette)) % len(self.style.palette)
-        self._draw_tapered_runner(self._phase * perimeter, runner_length, self.style.palette[color_index])
-
-    def _draw_tapered_runner(self, center_distance: float, length: float, color: str) -> None:
-        piece_count = 28
-        piece = max(5.0, length / piece_count)
-        pieces: list[tuple[float, float, str, int]] = []
-        for step in range(piece_count):
-            position = (step + 0.5) / piece_count
-            weight = max(0.0, 1.0 - abs(position * 2.0 - 1.0))
-            if weight <= 0.04:
-                continue
-            distance = center_distance - length / 2.0 + step * piece
-            fade = max(0.0, 0.84 - weight * 0.78)
-            segment_color = mix_hex_color(color, self.style.border, fade)
-            line_width = max(1, int(round(1 + weight * 4)))
-            pieces.append((weight, distance, segment_color, line_width))
-        for _weight, distance, segment_color, line_width in sorted(pieces, key=lambda item: item[0]):
-            self._draw_edge_piece(distance, piece * 1.18, segment_color, line_width)
-
-    def _draw_edge_piece(self, distance: float, length: float, color: str, line_width: int) -> None:
-        x1, y1, x2, y2 = self._rect_coords
-        width = max(1.0, x2 - x1)
-        height = max(1.0, y2 - y1)
-        perimeter = 2 * (width + height)
-        distance %= perimeter
-        inset = min(self._radius * 0.72, width / 3, height / 3)
-        if distance < width:
-            start = x1 + min(max(inset, distance), max(inset, width - inset))
-            end = min(x2 - inset, start + length)
-            if end > start:
-                self.create_line(start, y1, end, y1, fill=color, width=line_width, capstyle="round")
-            return
-        distance -= width
-        if distance < height:
-            start = y1 + min(max(inset, distance), max(inset, height - inset))
-            end = min(y2 - inset, start + length)
-            if end > start:
-                self.create_line(x2, start, x2, end, fill=color, width=line_width, capstyle="round")
-            return
-        distance -= height
-        if distance < width:
-            start = x2 - min(max(inset, distance), max(inset, width - inset))
-            end = max(x1 + inset, start - length)
-            if start > end:
-                self.create_line(start, y2, end, y2, fill=color, width=line_width, capstyle="round")
-            return
-        distance -= width
-        start = y2 - min(max(inset, distance), max(inset, height - inset))
-        end = max(y1 + inset, start - length)
-        if start > end:
-            self.create_line(x1, start, x1, end, fill=color, width=line_width, capstyle="round")
+    def _on_destroy(self, _event: tk.Event) -> None:
+        self.stop_animation()
 
     def _tick(self) -> None:
-        self._animation_ticks = getattr(self, "_animation_ticks", 0) + 1
-        if self._animation_ticks > 70:
-            self.stop_animation()
-            return
-        self._phase = (self._phase + 0.032) % 1.0
+        self._phase = (self._phase + 0.04) % 1.0
         self.redraw()
         self._after_id = self.after(self._frame_ms, self._tick)
 
-    def _on_destroy(self, _event: tk.Event) -> None:
-        self.stop_animation()
+    def _draw_thinking_pulse(self) -> None:
+        x1, y1, x2, y2 = self._rect_coords
+        if x2 <= x1 or y2 <= y1:
+            return
+        width = x2 - x1
+        height = y2 - y1
+        perimeter = 2 * (width + height)
+        num_dots = 3
+        for i in range(num_dots):
+            offset = (self._phase + i / num_dots) % 1.0
+            dist = offset * perimeter
+            alpha = max(0.0, 1.0 - abs(offset * 2.0 - 1.0) * 1.5)
+            if alpha < 0.1:
+                continue
+            color_idx = int((self._phase + i * 0.3) * len(self.style.palette)) % len(self.style.palette)
+            color = self.style.palette[color_idx]
+            inset = min(self._radius + 2, width / 4, height / 4)
+            if dist < width:
+                cx = x1 + inset + (dist / width) * (width - 2 * inset)
+                cy = y1
+            elif dist < width + height:
+                cx = x2
+                cy = y1 + inset + ((dist - width) / height) * (height - 2 * inset)
+            elif dist < 2 * width + height:
+                cx = x2 - inset - ((dist - width - height) / width) * (width - 2 * inset)
+                cy = y2
+            else:
+                cx = x1
+                cy = y2 - inset - ((dist - 2 * width - height) / height) * (height - 2 * inset)
+            r = max(1, int(2 * alpha))
+            self.create_oval(cx - r, cy - r, cx + r, cy + r, fill=color, outline="", width=0)

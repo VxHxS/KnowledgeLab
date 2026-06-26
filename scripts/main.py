@@ -833,6 +833,7 @@ class KnowledgeChatApp:
         self.dnd_backend = "none"
         self.project_actions = self.load_project_actions()
 
+        self._thinking_bubble: AnimatedMessageBubble | None = None
         self.node_registry = get_registry()
         for node_cls in BUILTIN_NODES + GOAL_NODES:
             self.node_registry.register(node_cls)
@@ -1524,7 +1525,14 @@ class KnowledgeChatApp:
         return ok
 
     def lmstudio_base_url(self) -> str:
-        return str(self.settings.get("lmstudio_base_url", LMSTUDIO_API_URL) or LMSTUDIO_API_URL).rstrip("/")
+        configured = str(self.settings.get("lmstudio_base_url", "") or "").rstrip("/")
+        if configured:
+            return configured
+        from knowledgelab.llm.port_detector import detect_lmstudio_port
+        port = detect_lmstudio_port()
+        base_url = f"http://127.0.0.1:{port}/v1"
+        self.settings["lmstudio_base_url"] = base_url
+        return base_url
 
     def llm_model_id(self) -> str:
         return str(self.settings.get("llm_model", DEFAULT_LLM_MODEL) or DEFAULT_LLM_MODEL)
@@ -1657,7 +1665,7 @@ class KnowledgeChatApp:
         self.chat.configure(state="disabled")
         self.chat.see("end")
 
-    def append_dialog_bubble(self, text: str, role: str, *, animated: bool = True) -> None:
+    def append_dialog_bubble(self, text: str, role: str, *, animated: bool = True) -> AnimatedMessageBubble:
         self.chat.configure(state="normal")
         self.chat.insert("end", "\n")
         canvas_width = max(430, self.chat.winfo_width() - 28)
@@ -1674,6 +1682,7 @@ class KnowledgeChatApp:
         self.chat_widgets.append(bubble)
         self.chat.configure(state="disabled")
         self.chat.see("end")
+        return bubble
 
     def append_system(self, text: str, persist: bool = False) -> None:
         self.append(f"{text}\n", "system")
@@ -1727,6 +1736,25 @@ class KnowledgeChatApp:
         clean_text = text.strip()
         if clean_text:
             self.append(f"{clean_text}\n", "warning")
+
+    def start_thinking_animation(self) -> None:
+        """Show a thinking bubble with animation while model processes."""
+        self._thinking_bubble = self.append_dialog_bubble("...", "assistant", animated=True)
+        if hasattr(self, "_thinking_bubble") and self._thinking_bubble:
+            self._thinking_bubble.start_animation()
+
+    def _stop_thinking_animation(self) -> None:
+        """Stop animation on thinking bubble and remove it."""
+        bubble = getattr(self, "_thinking_bubble", None)
+        if bubble:
+            bubble.stop_animation()
+            try:
+                bubble.destroy()
+            except tk.TclError:
+                pass
+            if bubble in self.chat_widgets:
+                self.chat_widgets.remove(bubble)
+            self._thinking_bubble = None
             if persist:
                 self.add_message("system", clean_text, "General")
 
@@ -2717,6 +2745,7 @@ class KnowledgeChatApp:
             warnings.append(f"LightRAG использован для {route.context_name}, потому что запрос явно просит найти данные в базе.")
 
         operation_id = self.begin_operation(f"Asking {route.context_name}...", self.query_timeout_seconds)
+        self.start_thinking_animation()
         target = self.run_query if use_lightrag else self.run_plain_query
         plain_prompt = prompt
         if explicit_knowledge_lookup and not use_lightrag:
@@ -2856,6 +2885,7 @@ class KnowledgeChatApp:
     def finish_query(self, operation_id: int, output: str, tag: str, warnings: list[str], lightrag_used: bool = False) -> None:
         if not self.is_active_operation(operation_id):
             return
+        self._stop_thinking_animation()
         self.append_assistant_message(output, tag, warnings=warnings, lightrag_used=lightrag_used)
         for warning in warnings:
             self.append_warning_message(warning)
