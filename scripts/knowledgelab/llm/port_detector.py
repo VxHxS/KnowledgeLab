@@ -10,7 +10,7 @@ from pathlib import Path
 
 PORT_HISTORY_FILE = Path(os.getenv("KNOWLEDGELAB_DATA_DIR", str(Path.home() / ".knowledgelab"))) / "port_history.json"
 DEFAULT_PORT = 1234
-COMMON_PORTS = [1234, 11434, 8080, 8000, 5000, 3000, 9090]
+COMMON_PORTS = [5000, 1234, 11434, 8080, 8000, 3000, 9090]
 
 
 def _read_port_history() -> list[dict]:
@@ -52,18 +52,7 @@ def _try_port(port: int, timeout: int = 2) -> bool:
 
 
 def detect_port_from_processes() -> int | None:
-    """Try to find LM Studio port from running processes."""
-    try:
-        result = subprocess.run(
-            ["tasklist", "/FI", "IMAGENAME eq lm-studio.exe", "/V", "/FO", "CSV"],
-            capture_output=True, text=True, timeout=5,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if "lm-studio" in result.stdout.lower():
-            pass
-    except Exception:
-        pass
-
+    """Try to find LM Studio port from running processes by scanning all listening ports."""
     try:
         result = subprocess.run(
             ["netstat", "-ano"],
@@ -71,13 +60,12 @@ def detect_port_from_processes() -> int | None:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         for line in result.stdout.split("\n"):
-            if "LISTENING" in line:
+            if "LISTENING" in line and "127.0.0.1" in line:
                 match = re.search(r":(\d+)\s", line)
                 if match:
                     port = int(match.group(1))
-                    if port in COMMON_PORTS or 1024 <= port <= 65535:
-                        if _try_port(port):
-                            return port
+                    if _try_port(port):
+                        return port
     except Exception:
         pass
 
