@@ -74,13 +74,13 @@ def available_lmstudio_models(base_url: str) -> list[str]:
         for model in models:
             if not isinstance(model, dict):
                 continue
-            for key in ("id", "key", "path", "displayName", "name"):
+            for key in ("id", "key", "model_key", "modelKey", "path", "displayName", "name"):
                 value = str(model.get(key) or "").strip()
                 if value:
                     ids.add(value)
             selected = model.get("selected_variant")
             if isinstance(selected, dict):
-                for key in ("id", "key", "path"):
+                for key in ("id", "key", "model_key", "modelKey", "path"):
                     value = str(selected.get(key) or "").strip()
                     if value:
                         ids.add(value)
@@ -88,7 +88,7 @@ def available_lmstudio_models(base_url: str) -> list[str]:
             if isinstance(loaded, list):
                 for item in loaded:
                     if isinstance(item, dict):
-                        value = str(item.get("model_key") or item.get("id") or "").strip()
+                        value = str(item.get("model_key") or item.get("modelKey") or item.get("id") or "").strip()
                         if value:
                             ids.add(value)
     if not ids:

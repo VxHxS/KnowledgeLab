@@ -10,6 +10,10 @@ Active launcher note from the user: `C:\Users\Юрий\Desktop\LightRag` is wher
 
 Recent UI/runtime changes:
 
+- Follow-up 2026-06-26: added `scripts\knowledgelab\control\lightrag_control.py`. `LightRAG-Chat` now delegates LM Studio base URL detection, model loading, readiness checks, and plain LLM calls to this shared LightRAG-Control module instead of orchestrating models directly in `main.py`.
+- Follow-up 2026-06-26: `ModelManager` now uses LM Studio native REST endpoints under `/api/v1/models/load` / `/api/v1/models/unload` for model orchestration, while inference stays on OpenAI-compatible `/v1/chat/completions`.
+- Follow-up 2026-06-26: LM Studio port autodetect no longer scans every local listening port. It checks configured/history/common LM Studio ports (`5000`, `1234`) and then LM Studio-owned process ports with short timeouts.
+- Follow-up 2026-06-26: short and full LM Studio model IDs are treated as equivalent for readiness checks, e.g. `qwen2.5-vl-7b-instruct` can match `lmstudio-community/Qwen2.5-VL-7B-Instruct-GGUF`.
 - Follow-up 2026-06-26: the chat edge animation now paints the four corner cells as canvases too, so the moving runner does not disappear when it crosses a corner.
 - Follow-up 2026-06-26: chat transcript text stays selectable/copyable by keeping the Tk `Text` widget normal while blocking edit keys/paste/cut. This fixes mouse selection in the chat without making the transcript user-editable.
 - Follow-up 2026-06-26: bookshelf/photo book reports now separate newly created notes from books that were already present in `50 Library`, using `already_in_vault` / `vault_note` set at save time.

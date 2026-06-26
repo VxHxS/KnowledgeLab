@@ -5,13 +5,15 @@ import json
 import os
 import re
 import subprocess
+import csv
 from pathlib import Path
 from urllib.parse import urlparse
 
 
 PORT_HISTORY_FILE = Path(os.getenv("KNOWLEDGELAB_DATA_DIR", str(Path.home() / ".knowledgelab"))) / "port_history.json"
 DEFAULT_PORT = 1234
-COMMON_PORTS = [5000, 1234, 11434, 8080, 8000, 3000, 9090]
+COMMON_PORTS = [5000, 1234]
+DETECT_TIMEOUT = 0.35
 
 
 def _read_port_history() -> list[dict]:
@@ -98,28 +100,59 @@ def is_lmstudio_base_url_available(base_url: str, timeout: float = 2.0) -> bool:
     return False
 
 
-def _try_port(port: int, timeout: int = 2) -> bool:
+def _try_port(port: int, timeout: float = 2) -> bool:
     try:
         return is_lmstudio_base_url_available(f"http://127.0.0.1:{port}/v1", timeout=timeout)
     except Exception:
         return False
 
 
+def _lmstudio_process_ids() -> set[int]:
+    pids: set[int] = set()
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        for row in csv.reader(result.stdout.splitlines()):
+            if len(row) < 2:
+                continue
+            name = row[0].strip().lower()
+            if "lm studio" not in name and "lmstudio" not in name and name != "lms.exe":
+                continue
+            try:
+                pids.add(int(row[1]))
+            except ValueError:
+                continue
+    except Exception:
+        pass
+    return pids
+
+
 def detect_port_from_processes() -> int | None:
-    """Try to find LM Studio port from running processes by scanning all listening ports."""
+    """Try to find LM Studio port from LM Studio-owned listening ports."""
+    lmstudio_pids = _lmstudio_process_ids()
+    if not lmstudio_pids:
+        return None
     try:
         result = subprocess.run(
             ["netstat", "-ano"],
             capture_output=True, text=True, timeout=5,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        ports: list[int] = []
         for line in result.stdout.split("\n"):
             if "LISTENING" in line and "127.0.0.1" in line:
-                match = re.search(r":(\d+)\s", line)
+                match = re.search(r":(\d+)\s+.*\s+(\d+)\s*$", line)
                 if match:
                     port = int(match.group(1))
-                    if _try_port(port):
-                        return port
+                    pid = int(match.group(2))
+                    if pid in lmstudio_pids:
+                        ports.append(port)
+        for port in sorted(set(ports), key=lambda item: (item not in COMMON_PORTS, item)):
+            if _try_port(port, timeout=0.5):
+                return port
     except Exception:
         pass
 
@@ -132,19 +165,19 @@ def detect_lmstudio_port() -> int:
     if env_url:
         port = port_from_base_url(env_url)
         if port is not None:
-            if _try_port(port):
+            if _try_port(port, timeout=DETECT_TIMEOUT):
                 _save_port(port, "env")
                 return port
 
     history = _read_port_history()
     for entry in reversed(history):
         port = entry.get("port")
-        if isinstance(port, int) and _try_port(port):
+        if isinstance(port, int) and _try_port(port, timeout=DETECT_TIMEOUT):
             _save_port(port, "history")
             return port
 
     for port in COMMON_PORTS:
-        if _try_port(port):
+        if _try_port(port, timeout=DETECT_TIMEOUT):
             _save_port(port, "common")
             return port
 
@@ -158,7 +191,7 @@ def detect_lmstudio_port() -> int:
 
 def detect_lmstudio_base_url(configured_url: str | None = None) -> tuple[str, str, bool]:
     configured = normalize_lmstudio_base_url(configured_url)
-    if configured_url and is_lmstudio_base_url_available(configured):
+    if configured_url and is_lmstudio_base_url_available(configured, timeout=DETECT_TIMEOUT):
         port = port_from_base_url(configured)
         if port is not None:
             _save_port(port, "configured")
@@ -166,7 +199,7 @@ def detect_lmstudio_base_url(configured_url: str | None = None) -> tuple[str, st
 
     port = detect_lmstudio_port()
     detected = normalize_lmstudio_base_url(f"http://127.0.0.1:{port}/v1")
-    found = is_lmstudio_base_url_available(detected)
+    found = is_lmstudio_base_url_available(detected, timeout=DETECT_TIMEOUT)
     return detected, "auto" if found else "default", found
 
 

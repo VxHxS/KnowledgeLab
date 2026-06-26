@@ -142,7 +142,7 @@ from knowledgelab.llm.lmstudio import (  # noqa: F401
     vision_model_state as vision_model_state_standalone,
     call_plain_lmstudio as call_plain_lmstudio_standalone,
 )
-from knowledgelab.llm.model_manager import ModelManager
+from knowledgelab.control import LightRAGControl
 from knowledgelab.llm.runtime_context import (  # noqa: F401
     build_runtime_context_prompt, is_safe_history_message as is_safe_history_message_standalone,
     build_prompt_with_history as build_prompt_with_history_standalone,
@@ -795,7 +795,11 @@ class KnowledgeChatApp:
         self._project_panel = ProjectActionPanel(self)
         self._capture_workflow = CaptureWorkflow(self)
         self._chat_list = ChatListManager(self)
-        self._model_manager = ModelManager(str(self.settings.get("lmstudio_base_url", LMSTUDIO_API_URL)))
+        self._control = LightRAGControl(
+            self.settings,
+            save_settings=self.save_settings,
+            timeout_seconds=lambda: self.query_timeout_seconds,
+        )
         self.tooltips: list[ToolTip] = []
         self.icon_images: list[tk.PhotoImage] = []
         self.obsidian_raw_image: tk.PhotoImage | None = None
@@ -1546,66 +1550,36 @@ class KnowledgeChatApp:
         return ok
 
     def lmstudio_base_url(self) -> str:
-        from knowledgelab.llm.port_detector import detect_lmstudio_base_url, is_lmstudio_base_url_available, normalize_lmstudio_base_url
-        configured = normalize_lmstudio_base_url(str(self.settings.get("lmstudio_base_url", "") or ""))
-        if is_lmstudio_base_url_available(configured, timeout=2):
-            base_url = configured
-        else:
-            base_url, _source, found = detect_lmstudio_base_url(configured)
-            if not found and configured:
-                base_url = configured
-        if self.settings.get("lmstudio_base_url") != base_url:
-            self.settings["lmstudio_base_url"] = base_url
-            self.save_settings()
-        if getattr(self, "_model_manager", None) is not None:
-            self._model_manager.base_url = base_url.rstrip("/")
-        return base_url
+        return self._control.lmstudio_base_url()
 
     def llm_model_id(self) -> str:
-        return str(self.settings.get("llm_model", DEFAULT_LLM_MODEL) or DEFAULT_LLM_MODEL)
+        return self._control.llm_model_id()
 
     def vision_model_id(self) -> str:
-        configured = str(self.settings.get("vision_model", DEFAULT_VISION_MODEL) or DEFAULT_VISION_MODEL).strip()
-        if configured:
-            return configured
-        try:
-            models = self.loaded_lmstudio_models()
-        except Exception:
-            models = []
-        for model in models:
-            if is_vision_model_name(model):
-                return model
-        return self.llm_model_id()
+        return self._control.vision_model_id()
 
     def vision_model_state(self) -> tuple[str, bool, list[str]]:
-        return vision_model_state_standalone(self.settings, self.lmstudio_base_url())
+        return self._control.ensure_vision_model()
 
     def embedding_model_id(self) -> str:
         return str(self.settings.get("embedding_model", DEFAULT_EMBEDDING_MODEL) or DEFAULT_EMBEDDING_MODEL)
 
     def lmstudio_request_json(self, path: str, *, method: str = "GET", payload: dict | None = None, timeout: float = 8.0) -> dict:
-        return lmstudio_request_json(self.lmstudio_base_url(), path, method=method, payload=payload, timeout=timeout)
+        return self._control.lmstudio_request_json(path, method=method, payload=payload, timeout=timeout)
 
     def loaded_lmstudio_models(self) -> list[str]:
-        return loaded_lmstudio_models(self.lmstudio_base_url())
+        return self._control.loaded_lmstudio_models()
 
     def check_lmstudio_ready(self, *, require_models: bool = True) -> tuple[bool, str, list[str]]:
-        return check_lmstudio_ready_standalone(
-            self.lmstudio_base_url(), self.llm_model_id(), require_models=require_models,
-        )
+        return self._control.check_lmstudio_ready(require_models=require_models)
 
     def extract_chat_content(self, response: dict) -> tuple[str, str]:
-        return extract_chat_content_standalone(response)
+        return self._control.extract_chat_content(response)
 
     def call_plain_lmstudio(self, question: str, *, max_tokens: int | None = None, topic_context: str = "") -> tuple[str, str]:
-        max_tokens = max_tokens or int(os.getenv("LMSTUDIO_GUI_MAX_RESPONSE_TOKENS", "1800"))
-        if bool(self.settings.get("auto_switch_models", True)):
-            llm_model = self.llm_model_id()
-            if llm_model:
-                self._model_manager.ensure_model(llm_model)
-        return call_plain_lmstudio_standalone(
-            question, self.lmstudio_base_url(), self.llm_model_id(),
-            timeout=min(self.query_timeout_seconds, 120), max_tokens=max_tokens,
+        return self._control.call_plain_lmstudio(
+            question,
+            max_tokens=max_tokens,
             topic_context=topic_context,
         )
 

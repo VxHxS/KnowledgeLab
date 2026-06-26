@@ -141,13 +141,13 @@ sequenceDiagram
 | Conversation Store | Local JSON sessions with messages, warnings, timestamps, and current chat |
 | Intent Router | Treats all input as normal chat first, then activates save/RAG/diagnostic capabilities when appropriate |
 | Runtime Context Snapshot | Injects current app state into each GUI prompt: active root, vault, LM Studio models, selected route, LightRAG index readiness, DnD backend, queues, background book/video tasks, and project server state |
-| Direct LM Studio Adapter | Checks `/v1/models`, validates loaded model IDs, and sends plain chat directly to `/v1/chat/completions` |
+| Direct LM Studio Adapter | Sends plain chat to `/v1/chat/completions`; runtime/model decisions are coordinated by the control layer |
 | LightRAG Adapter | Uses indexed storage only when LightRAG is enabled in Settings and storage exists |
 | Obsidian Capture | Saves URLs, notes, and attached files from chat into lightweight Markdown notes |
 | Material Pipeline | Parses web pages into Markdown, syncs YouTube transcripts, extracts lightweight text/DOCX/folder samples, queues images/PDF/audio/video/folder/GitHub/generic sources in `tmp/material-processing-queue.jsonl`, and provides the extension point for OCR, ASR, document cleanup, repository import, folder ingestion, and reindexing |
 | Health Hints | Converts system failures into readable guidance and suggests LightRAG-Control |
 | GPU Game Guard | Samples GPU load after chat opens; warns about heavy processes and KnowledgeLab-side processes |
-| LightRAG-Control | Manual checks, maintenance indexing, model stop, imports, and deeper troubleshooting |
+| LightRAG-Control | Shared control-plane module plus desktop control window: LM Studio port/model orchestration, manual checks, maintenance indexing, model stop, imports, and deeper troubleshooting |
 | Book Discovery Pipeline | Background LM Studio vision worker detects books from photos, enriches through Open Library + Google Books, creates canonical book notes under 50 Library |
 | Video Analysis Pipeline | FFmpeg frame sampling, local vision model for screen text, YouTube caption sync, ASR queue |
 | Runtime Context Injection | Generates app state block injected into every LM Studio prompt (active root, vault, models, route, LightRAG readiness, DnD backend, queues, background tasks) |
@@ -188,6 +188,8 @@ scripts/
 │   ├── vision/
 │   │   ├── book_discovery.py        # Book detection, catalog enrichment
 │   │   └── html_parsers.py          # Re-export from material.web
+│   ├── control/
+│   │   └── lightrag_control.py     # Shared LM Studio runtime/model orchestration
 │   ├── llm/
 │   │   ├── lmstudio.py              # LM Studio API client, model checks
 │   │   ├── runtime_context.py       # Runtime context prompt generation
@@ -243,6 +245,8 @@ scripts/
 │   ├── vision/
 │   │   ├── book_discovery.py        # Book detection, catalog enrichment
 │   │   └── html_parsers.py          # Re-export from material.web
+│   ├── control/
+│   │   └── lightrag_control.py     # Shared LM Studio runtime/model orchestration
 │   ├── llm/
 │   │   ├── lmstudio.py              # LM Studio API client, model checks
 │   │   ├── runtime_context.py       # Runtime context prompt generation

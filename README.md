@@ -334,7 +334,7 @@ Download in LM Studio: Models → Search → `Qwen2.5-Coder-Uncensored`
 
 ### Auto-switching
 
-KnowledgeLab automatically loads/unloads models via LM Studio API. When a book photo is sent, it loads the vision model; for chat, it loads the LLM. Disable in Settings → "Автопереключение моделей" if you prefer manual control.
+KnowledgeLab routes model orchestration through the shared LightRAG-Control module. When a book photo is sent, Chat asks the control layer to load the configured vision model; for normal chat, it asks for the configured LLM. Disable Settings -> "Auto-switch models" if you prefer manual control in LM Studio.
 
 ### Default models
 
@@ -378,6 +378,7 @@ scripts/
     vault/    (frontmatter, capture, capture_workflow)
     material/ (web, codepen, github, queue, youtube, video, workers, transcript_clean)
     vision/   (book_discovery, book_pipeline, book_downloads, book_sources, html_parsers)
+    control/  (lightrag_control shared runtime/model orchestration)
     llm/      (lmstudio, runtime_context, diagnostics, web_search, voice, game_guard)
     ui/       (widgets, theme, tooltip, chat_store, settings, settings_dialog,
                game_guard_dialog, project_panel, chat_list, dialogs,
