@@ -1232,6 +1232,10 @@ class KnowledgeChatApp:
         self.input.bind("<Alt-Up>", lambda _event: self.navigate_input_history(-1))
         self.input.bind("<Alt-Down>", lambda _event: self.navigate_input_history(1))
         self.input.bind("<KeyRelease>", self.update_char_count)
+        self.input.bind("<Control-c>", lambda _event: self._copy_selection(self.input))
+        self.input.bind("<Control-v>", lambda _event: self._paste_to_input())
+        self.input.bind("<Control-a>", lambda _event: self._select_all(self.input))
+        self.chat.bind("<Control-c>", lambda _event: self._copy_selection(self.chat))
 
         char_count_frame = tk.Frame(input_frame, bg="#ffffff")
         char_count_frame.grid(row=1, column=0, sticky="ew", padx=1, pady=(0, 1))
@@ -2649,6 +2653,29 @@ class KnowledgeChatApp:
             else:
                 self.char_count_label.configure(text="")
         except Exception:
+            pass
+
+    def _copy_selection(self, widget: tk.Text) -> None:
+        try:
+            if widget.tag_ranges("sel"):
+                text = widget.get("sel.first", "sel.last")
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+        except tk.TclError:
+            pass
+
+    def _paste_to_input(self) -> None:
+        try:
+            text = self.root.clipboard_get()
+            if text:
+                self.input.insert("insert", text)
+        except tk.TclError:
+            pass
+
+    def _select_all(self, widget: tk.Text) -> None:
+        try:
+            widget.tag_add("sel", "1.0", "end")
+        except tk.TclError:
             pass
 
     def on_ctrl_return(self, _event: tk.Event | None = None) -> str:
