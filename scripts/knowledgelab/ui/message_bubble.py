@@ -20,19 +20,19 @@ class MessageBubbleStyle:
 ROLE_STYLES = {
     "assistant": MessageBubbleStyle(
         fill="#ffffff",
-        border="#e0e7ee",
+        border="#d1d5db",
         text=UI_THEME["text"],
         max_width=680,
         align="left",
-        palette=("#3b82f6", "#8b5cf6", "#06b6d4", "#10b981"),
+        palette=("#3b82f6", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#ec4899"),
     ),
     "user": MessageBubbleStyle(
         fill="#f0f4f8",
-        border="#d1d9e0",
+        border="#d1d5db",
         text="#1a202c",
         max_width=560,
         align="right",
-        palette=("#3b82f6", "#8b5cf6", "#06b6d4", "#10b981"),
+        palette=("#3b82f6", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#ec4899"),
     ),
     "error": MessageBubbleStyle(
         fill="#fef2f2",
@@ -40,7 +40,7 @@ ROLE_STYLES = {
         text="#dc2626",
         max_width=680,
         align="left",
-        palette=("#ef4444", "#f97316", "#eab308", "#84cc16"),
+        palette=("#ef4444", "#f97316", "#eab308", "#84cc16", "#06b6d4", "#8b5cf6", "#ec4899"),
     ),
 }
 
@@ -53,7 +53,7 @@ class AnimatedMessageBubble(tk.Canvas):
     _margin_x = 18
     _pad_x = 14
     _pad_y = 10
-    _frame_ms = 60
+    _frame_ms = 120
 
     def __init__(
         self,
@@ -172,7 +172,7 @@ class AnimatedMessageBubble(tk.Canvas):
         self.stop_animation()
 
     def _tick(self) -> None:
-        self._phase = (self._phase + 0.04) % 1.0
+        self._phase = (self._phase + 0.02) % 1.0
         self.redraw()
         self._after_id = self.after(self._frame_ms, self._tick)
 
@@ -183,27 +183,41 @@ class AnimatedMessageBubble(tk.Canvas):
         width = x2 - x1
         height = y2 - y1
         perimeter = 2 * (width + height)
-        num_dots = 3
-        for i in range(num_dots):
-            offset = (self._phase + i / num_dots) % 1.0
-            dist = offset * perimeter
-            alpha = max(0.0, 1.0 - abs(offset * 2.0 - 1.0) * 1.5)
-            if alpha < 0.1:
+        num_lines = 4
+        inset = min(self._radius + 2, width / 4, height / 4)
+        for i in range(num_lines):
+            offset = (self._phase + i / num_lines) % 1.0
+            alpha = max(0.0, 1.0 - abs(offset * 2.0 - 1.0) * 1.8)
+            if alpha < 0.08:
                 continue
-            color_idx = int((self._phase + i * 0.3) * len(self.style.palette)) % len(self.style.palette)
+            color_idx = int((self._phase + i * 0.25) * len(self.style.palette)) % len(self.style.palette)
             color = self.style.palette[color_idx]
-            inset = min(self._radius + 2, width / 4, height / 4)
-            if dist < width:
-                cx = x1 + inset + (dist / width) * (width - 2 * inset)
-                cy = y1
-            elif dist < width + height:
-                cx = x2
-                cy = y1 + inset + ((dist - width) / height) * (height - 2 * inset)
-            elif dist < 2 * width + height:
-                cx = x2 - inset - ((dist - width - height) / width) * (width - 2 * inset)
-                cy = y2
-            else:
-                cx = x1
-                cy = y2 - inset - ((dist - 2 * width - height) / height) * (height - 2 * inset)
-            r = max(1, int(2 * alpha))
-            self.create_oval(cx - r, cy - r, cx + r, cy + r, fill=color, outline="", width=0)
+            seg_len = perimeter * 0.08
+            start_dist = offset * perimeter
+            points: list[float] = []
+            steps = 12
+            for s in range(steps + 1):
+                frac = s / steps
+                dist = (start_dist + frac * seg_len) % perimeter
+                seg_alpha = alpha * (1.0 - abs(frac * 2.0 - 1.0))
+                if dist < width:
+                    px = x1 + inset + (dist / width) * (width - 2 * inset)
+                    py = y1
+                elif dist < width + height:
+                    px = x2
+                    py = y1 + inset + ((dist - width) / height) * (height - 2 * inset)
+                elif dist < 2 * width + height:
+                    px = x2 - inset - ((dist - width - height) / width) * (width - 2 * inset)
+                    py = y2
+                else:
+                    px = x1
+                    py = y2 - inset - ((dist - 2 * width - height) / height) * (height - 2 * inset)
+                points.extend([px, py])
+            if len(points) >= 4:
+                self.create_line(
+                    points,
+                    fill=color,
+                    width=max(1, int(round(1.5 * alpha))),
+                    smooth=True,
+                    capstyle="round",
+                )
